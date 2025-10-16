@@ -12,13 +12,15 @@ const __dirname  = path.dirname(__filename);
 
 const app = express();
 app.use(cors());
-app.use(express.static(__dirname)); // serves index.html, /uploads/*, etc.
+app.use(express.static(__dirname)); // serves index.html
 
-const uploadDir = path.join(__dirname, 'uploads');
-if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir);
+// ---------- Dirs ----------
+const uploadDir = path.join(__dirname, 'uploads');     // public before recall
+const vaultDir  = path.join(__dirname, 'vault');       // private after recall (owner-only)
+for (const d of [uploadDir, vaultDir]) if (!fs.existsSync(d)) fs.mkdirSync(d);
 
-// ---- Utils ----
-function uid() { return (Date.now().toString(36) + Math.random().toString(36).slice(2,8)); }
+// ---------- Utils ----------
+function uid(){ return (Date.now().toString(36) + Math.random().toString(36).slice(2,8)); }
 function getClientIP(req) {
   const xf = req.headers['x-forwarded-for'];
   let ip = Array.isArray(xf) ? xf[0] : (xf || req.socket?.remoteAddress || '');
@@ -39,16 +41,23 @@ function listUsers(room) {
   if (!set) return [];
   return [...set].map(c => meta.get(c)?.username).filter(Boolean);
 }
-function broadcast(room, obj) {
+function broadcast(room, payload){
   const set = rooms.get(room);
   if (!set) return;
-  const s = JSON.stringify(obj);
-  for (const client of set) {
-    try { client.send(s); } catch {}
+  const s = JSON.stringify(payload);
+  for (const ws of set) { try { ws.send(s); } catch {} }
+}
+function sendTo(room, predicate, payload){
+  const set = rooms.get(room);
+  if (!set) return;
+  const s = JSON.stringify(payload);
+  for (const ws of set) {
+    const m = meta.get(ws);
+    if (m && predicate(m)) { try { ws.send(s); } catch {} }
   }
 }
 
-// ---- Multer (25 MB per file) ----
+// ---------- Multer (25 MB) ----------
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => cb(null, uploadDir),
   filename: (_req, file, cb) => {
@@ -58,10 +67,10 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage, limits: { fileSize: 25 * 1024 * 1024 } });
 
-// ---- Rooms & Message Registry ----
-const rooms = new Map();            // roomId -> Set(ws)
-const meta  = new Map();            // ws -> {room, username}
-const registry = new Map();         // msgId -> {id, room, type, owner, filePath?}
+// ---------- Rooms & Registry ----------
+const rooms = new Map();   // room -> Set(ws)
+const meta  = new Map();   // ws -> {room, username}
+const reg   = new Map();   // id -> { id, room, type:'chat'|'file', owner, ts, text?, file?{name,savedAs,size,mime}, filePath?, recalled:false, privatePath? }
 
 // Serve index for any GET (room = path)
 app.get('*', (req, res, next) => {
@@ -72,7 +81,21 @@ app.get('*', (req, res, next) => {
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 
-// ---- WebSockets ----
+// Static serving for /uploads (public pre-recall)
+app.use('/uploads', express.static(uploadDir));
+
+// Gated serving for owner-only files after recall
+app.get('/myfile/:id', (req, res) => {
+  const id = String(req.params.id || '');
+  const item = reg.get(id);
+  if (!item || item.type !== 'file' || !item.privatePath) return res.status(404).end();
+  const ip = getClientIP(req);
+  if (ip !== item.owner) return res.status(403).send('Forbidden');
+  // stream file
+  res.sendFile(path.resolve(item.privatePath));
+});
+
+// ---------- WS ----------
 wss.on('connection', (ws, req) => {
   const room = roomFromReq(req);
   const username = getClientIP(req);
@@ -95,34 +118,58 @@ wss.on('connection', (ws, req) => {
     let data;
     try { data = JSON.parse(buf); } catch { return; }
 
-    // ---- Send text message ----
+    // ---- chat ----
     if (data.type === 'chat') {
       const id = uid();
       const text = String(data.text || '').slice(0, 4000);
-      const msg = { type:'chat', id, from: username, text, ts: Date.now() };
-      registry.set(id, { id, room, type:'chat', owner: username });
-      broadcast(room, msg);
+      const ts = Date.now();
+      reg.set(id, { id, room, type:'chat', owner: username, ts, text, recalled:false });
+      broadcast(room, { type:'chat', id, from: username, text, ts });
       return;
     }
 
-    // ---- Recall (delete) message/attachment ----
+    // ---- recall ----
     if (data.type === 'recall' && data.id) {
-      const entry = registry.get(String(data.id));
-      if (!entry || entry.room !== room) return;
+      const id = String(data.id);
+      const item = reg.get(id);
+      if (!item || item.room !== room) return;
 
-      // Only owner can recall
-      if (entry.owner !== username) {
+      if (item.owner !== username) {
         ws.send(JSON.stringify({ type:'error', message:'Only the sender can recall this item.' }));
         return;
       }
 
-      // If it’s a file, delete it
-      if (entry.type === 'file' && entry.filePath) {
-        try { fs.unlinkSync(entry.filePath); } catch {}
+      // If file: move to vault (owner-only), kill public access
+      if (item.type === 'file' && item.filePath && !item.privatePath) {
+        try {
+          const dest = path.join(vaultDir, path.basename(item.filePath));
+          fs.renameSync(item.filePath, dest);
+          item.privatePath = dest;     // now gated
+          item.filePath = null;        // no longer public
+        } catch {
+          // If move fails, fall back to unlink (last resort)
+          try { fs.unlinkSync(item.filePath); } catch {}
+          item.privatePath = null;
+          item.filePath = null;
+        }
       }
 
-      registry.delete(entry.id);
-      broadcast(room, { type:'recalled', id: entry.id });
+      item.recalled = true;
+
+      // Receiver view: show tombstone + system line; hide original
+      sendTo(room, (m) => m.username !== item.owner, {
+        type: 'recalled',
+        id,
+        sys: 'This item was recalled by the sender.'
+      });
+
+      // Sender view: keep original bubble, add system line; if file, update to gated URL
+      const ownerNote = { type: 'recalled_owner', id, sys: 'You recalled this. The other person can no longer see it.' };
+      if (item.type === 'file' && item.privatePath) {
+        ownerNote.newUrl = `/myfile/${id}`;
+      }
+      sendTo(room, (m) => m.username === item.owner, ownerNote);
+
       return;
     }
   });
@@ -137,7 +184,7 @@ wss.on('connection', (ws, req) => {
   });
 });
 
-// ---- Uploads HTTP endpoint ----
+// ---------- Upload endpoint ----------
 app.post('/upload/:room', upload.array('file', 5), (req, res) => {
   const room = (req.params.room || '').trim() || 'chat';
   const set = rooms.get(room);
@@ -148,20 +195,16 @@ app.post('/upload/:room', upload.array('file', 5), (req, res) => {
 
   const files = (req.files || []).map(f => {
     const id = uid();
-    const rec = {
-      id,
-      room,
-      type: 'file',
-      owner: from,
-      filePath: f.path
+    const ts = Date.now();
+    const record = {
+      id, room, type:'file', owner: from, ts,
+      file: { name: f.originalname, savedAs: path.basename(f.path), size: f.size, mime: f.mimetype },
+      filePath: f.path, privatePath: null, recalled:false
     };
-    registry.set(id, rec);
+    reg.set(id, record);
 
     const payload = {
-      type: 'file',
-      id,
-      from,
-      ts: Date.now(),
+      type:'file', id, from, ts,
       file: {
         name: f.originalname,
         savedAs: path.basename(f.path),
@@ -177,10 +220,8 @@ app.post('/upload/:room', upload.array('file', 5), (req, res) => {
   res.json({ ok:true, files });
 });
 
-app.use('/uploads', express.static(uploadDir));
-
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-  console.log('1:1 chat with recall & file transfer listening on', PORT);
+  console.log('1:1 chat with sender-only retention & recall listening on', PORT);
   console.log('Open http://localhost:'+PORT+'/your-room');
 });
