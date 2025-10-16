@@ -25,25 +25,18 @@
   .tip{color:#9fb0c2;font-size:.9rem;margin:0 18px 8px}
 
   /* system note */
-  .sys{
-    color:#b7c6d8;
-    font-size:.86rem;
-    margin-top:6px;
-  }
+  .sys{ color:#b7c6d8; font-size:.86rem; margin-top:6px; }
   .row.me .sys{ text-align:right; }
   .row:not(.me) .sys{ text-align:left; }
 
   /* three-dot (kebab) */
   .kebab{
     position:absolute; top:6px; right:6px;
-    width:30px; height:30px;
-    display:grid; place-items:center;
+    width:30px; height:30px; display:grid; place-items:center;
     font-size:18px; line-height:0;
     background:rgba(255,255,255,.08);
     border:1px solid rgba(255,255,255,.18);
-    border-radius:10px;
-    color:#e7edf4;
-    cursor:pointer;
+    border-radius:10px; color:#e7edf4; cursor:pointer;
     opacity:.55;
     transition:opacity .15s ease, transform .15s ease, background .15s ease;
     box-shadow:0 2px 10px rgba(0,0,0,.25);
@@ -64,6 +57,26 @@
   }
   .menu button:hover{ background:#141a26 }
   .tomb { font-style:italic; color:#cfd9e6 }
+
+  /* countdown */
+  .expiry{ color:#ff6b6b; font-size:.85rem; margin-top:4px; }
+
+  /* TTL panel (appears after file choose, before upload) */
+  .ttl-panel{
+    position:fixed; left:50%; bottom:88px; transform:translateX(-50%);
+    background:#111825; border:1px solid var(--border);
+    border-radius:14px; box-shadow:0 18px 50px rgba(0,0,0,.5);
+    padding:14px; display:none; gap:10px; align-items:center; z-index:20;
+  }
+  .ttl-panel.open{ display:flex; flex-wrap:wrap; }
+  .ttl-panel label{ font-size:.9rem; color:#d8e1ee; margin-right:8px }
+  .ttl-panel select{ background:#0f141b; color:#e7edf4; border:1px solid var(--border); border-radius:10px; padding:6px 8px; }
+  .ttl-panel .actions{ display:flex; gap:10px; }
+  .ttl-panel .btn{
+    border:1px solid var(--border); background:#1b87f3; color:#fff;
+    padding:8px 12px; border-radius:10px; cursor:pointer;
+  }
+  .ttl-panel .btn.secondary{ background:#0f141b; color:#e7edf4; }
 </style>
 </head>
 <body>
@@ -88,6 +101,19 @@
   </div>
 </div>
 
+<!-- Auto-recall TTL panel -->
+<div id="ttlPanel" class="ttl-panel" aria-live="polite">
+  <label>Recall after:</label>
+  <select id="ttlDays"></select><span>days</span>
+  <select id="ttlHours"></select><span>hours</span>
+  <select id="ttlMinutes"></select><span>minutes</span>
+  <select id="ttlSeconds"></select><span>seconds</span>
+  <div class="actions">
+    <button id="ttlSend" class="btn">Send files</button>
+    <button id="ttlCancel" class="btn secondary">Cancel</button>
+  </div>
+</div>
+
 <script>
 const log = document.getElementById('log');
 const title = document.getElementById('title');
@@ -97,7 +123,16 @@ const sendBtn = document.getElementById('send');
 const attachBtn = document.getElementById('attach');
 const fileInput = document.getElementById('fileInput');
 
+const ttlPanel = document.getElementById('ttlPanel');
+const selD = document.getElementById('ttlDays');
+const selH = document.getElementById('ttlHours');
+const selM = document.getElementById('ttlMinutes');
+const selS = document.getElementById('ttlSeconds');
+const ttlSend = document.getElementById('ttlSend');
+const ttlCancel = document.getElementById('ttlCancel');
+
 let myName = '', myRoom = roomFromPath();
+let pendingFiles = null; // File[] to send after TTL selection
 
 function roomFromPath(){ const p = location.pathname.replace(/^\/+|\/+$/g,''); return p || 'chat'; }
 function wsURL(){ const proto = location.protocol === 'https:' ? 'wss://' : 'ws://'; return proto + location.host + location.pathname; }
@@ -134,7 +169,7 @@ function writeText(kind, id, text, ts=Date.now()){
   log.scrollTop = log.scrollHeight;
 }
 
-function writeFile(kind, id, file, ts=Date.now()){
+function writeFile(kind, id, file, ts=Date.now(), expiresAt=null){
   const row = document.createElement('div');
   row.className = 'row ' + (kind==='me' ? 'me' : '');
   row.dataset.id = id;
@@ -146,12 +181,14 @@ function writeFile(kind, id, file, ts=Date.now()){
     <div class="bubble">
       ${bubbleMenu(id, kind==='me')}
       <div class="filecard">${content}</div>
+      ${expiresAt ? `<div class="expiry" data-expires="${expiresAt}" data-id="${id}">⏱ calculating…</div>` : ''}
       <div class="meta">${new Date(ts).toLocaleString()}</div>
     </div>`;
   log.appendChild(row);
   log.scrollTop = log.scrollHeight;
 }
 
+// Receiver view on recall: tombstone + system line
 function recallForReceiver(id, sysText){
   const row = log.querySelector(`.row[data-id="${CSS.escape(id)}"]`);
   if (!row) return;
@@ -163,20 +200,53 @@ function recallForReceiver(id, sysText){
   setTimeout(()=> row.scrollIntoView({behavior:'smooth', block:'nearest'}), 0);
 }
 
+// Sender view on recall: keep content, add system line; remove countdown; if file, URL may change
 function markOwnerRecalled(id, sysText, newUrl){
   const row = log.querySelector(`.row[data-id="${CSS.escape(id)}"]`);
   if (!row) return;
+
+  // update link/src if gated URL provided
   if (newUrl) {
     const a = row.querySelector('.filename');
     const img = row.querySelector('.filethumb');
     if (a) a.href = newUrl;
     if (img) img.src = newUrl;
   }
+
+  // remove countdown if present
+  const exp = row.querySelector('.expiry');
+  if (exp) exp.remove();
+
   appendSystemLine(row, sysText || 'You recalled this. The other person can no longer see it.');
   setTimeout(()=> row.scrollIntoView({behavior:'smooth', block:'nearest'}), 0);
 }
 
-// ---- WS ----
+// ---- Countdown updater ----
+function fmtRemaining(ms){
+  if (ms <= 0) return 'recalling…';
+  const s = Math.floor(ms/1000);
+  const d = Math.floor(s/86400);
+  const h = Math.floor((s%86400)/3600);
+  const m = Math.floor((s%3600)/60);
+  const ss = s%60;
+  const parts = [];
+  if (d) parts.push(d+'d');
+  if (h || d) parts.push(h+'h');
+  if (m || h || d) parts.push(m+'m');
+  parts.push(ss+'s');
+  return '⏱ ' + parts.join(' ');
+}
+
+function tickCountdowns(){
+  const now = Date.now();
+  document.querySelectorAll('.expiry').forEach(el => {
+    const exp = parseInt(el.getAttribute('data-expires') || '0', 10);
+    el.textContent = fmtRemaining(exp - now);
+  });
+}
+setInterval(tickCountdowns, 1000);
+
+// ---- WebSocket ----
 const ws = new WebSocket(wsURL());
 ws.onopen = () => { title.textContent = 'Room: ' + myRoom; };
 ws.onmessage = (ev) => {
@@ -200,7 +270,7 @@ ws.onmessage = (ev) => {
   }
   if (d.type === 'file') {
     const who = d.from === myName ? 'me' : 'them';
-    writeFile(who, d.id, d.file, d.ts); return;
+    writeFile(who, d.id, d.file, d.ts, d.expiresAt || null); return;
   }
   if (d.type === 'recalled') { // receiver view
     recallForReceiver(d.id, d.sys); return;
@@ -222,11 +292,12 @@ function send(){
   msgInput.value = '';
 }
 
-// ---- Upload ----
-async function uploadFiles(files){
+// ---- Upload with optional TTL (seconds) ----
+async function uploadFiles(files, ttlSeconds){
   if (!files || files.length === 0) return;
   const form = new FormData();
   for (const f of files) form.append('file', f);
+  if (ttlSeconds && ttlSeconds > 0) form.append('ttl', String(ttlSeconds));
   try{
     const res = await fetch(`/upload/${encodeURIComponent(myRoom)}`, { method:'POST', body: form });
     if (!res.ok) {
@@ -235,7 +306,9 @@ async function uploadFiles(files){
     }
   }catch(err){
     writeText('them', '⚠️ ' + (err?.message || 'Upload failed'));
-  }finally{ fileInput.value = ''; }
+  }finally{
+    fileInput.value = '';
+  }
 }
 
 // ---- Recall ----
@@ -245,7 +318,47 @@ function recall(id){ ws.send(JSON.stringify({ type:'recall', id })); }
 sendBtn.onclick = send;
 msgInput.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); send(); }});
 attachBtn.addEventListener('click', () => fileInput.click());
-fileInput.addEventListener('change', (e) => uploadFiles(e.target.files));
+
+// Build TTL dropdowns
+function fillSelect(sel, max){
+  sel.innerHTML = '';
+  for (let i=0;i<=max;i++){
+    const opt = document.createElement('option');
+    opt.value = i; opt.textContent = String(i).padStart(2,'0');
+    sel.appendChild(opt);
+  }
+}
+fillSelect(selD, 30); // days (0..30)
+fillSelect(selH, 23); // hours
+fillSelect(selM, 59); // minutes
+fillSelect(selS, 59); // seconds
+function openTTLPanel(){ ttlPanel.classList.add('open'); }
+function closeTTLPanel(){ ttlPanel.classList.remove('open'); pendingFiles = null; }
+
+fileInput.addEventListener('change', (e) => {
+  const files = Array.from(e.target.files || []);
+  if (!files.length) return;
+  pendingFiles = files;
+  // reset selects
+  selD.value = '0'; selH.value = '0'; selM.value = '0'; selS.value = '0';
+  openTTLPanel();
+});
+
+ttlSend.addEventListener('click', async () => {
+  if (!pendingFiles) return closeTTLPanel();
+  const d = parseInt(selD.value,10)||0;
+  const h = parseInt(selH.value,10)||0;
+  const m = parseInt(selM.value,10)||0;
+  const s = parseInt(selS.value,10)||0;
+  const ttlSeconds = (d*86400) + (h*3600) + (m*60) + s;
+  await uploadFiles(pendingFiles, ttlSeconds);
+  closeTTLPanel();
+});
+
+ttlCancel.addEventListener('click', () => {
+  closeTTLPanel();
+});
+
 
 // Menus
 log.addEventListener('click', (e) => {
@@ -263,8 +376,10 @@ log.addEventListener('click', (e) => {
   }
 });
 document.addEventListener('click', (e) => {
-  const inside = e.target.closest('.menu, .kebab');
-  if (!inside) document.querySelectorAll('.menu.open').forEach(m => m.classList.remove('open'));
+  const inside = e.target.closest('.menu, .kebab, #ttlPanel');
+  if (!inside) {
+    document.querySelectorAll('.menu.open').forEach(m => m.classList.remove('open'));
+  }
 });
 </script>
 </body>
