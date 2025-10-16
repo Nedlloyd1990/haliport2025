@@ -1,26 +1,29 @@
 
-Haliport • One-to-one Messenger (Render + MongoDB Atlas)
+Haliport One-to-One (No DB) — anyone with the URL can join a private room.
 
-Files:
-- package.json  -> node scripts + dependencies
-- server.js      -> Express + WebSocket (ws) + MongoDB + JWT login
-- login.html     -> username -> POST /login -> token -> redirect to index
-- index.html     -> WhatsApp-like UI; connects to same-origin WebSocket
+How it works
+------------
+- A "room" is just a name in the URL: https://YOUR.onrender.com/?room=team-47
+- Each room allows exactly TWO people.
+- No database or login. Everything is in memory; if the server restarts, history is gone.
 
-Local run (dev):
-1) Install Node 18+
-2) In one terminal:
-   set MONGODB_URI=mongodb://127.0.0.1:27017/haliport
-   set JWT_SECRET=dev-change-me
-   npm install
-   npm start
-3) Open http://localhost:3000/login.html
+Files
+-----
+- package.json  : start script + deps
+- server.js     : Express + ws WebSocket room server
+- index.html    : UI with name + room + chat
 
-Deploy (Render):
-- Create a Web Service from this folder/repo.
-- Enable WebSockets.
-- Env vars:
-    MONGODB_URI = your Atlas URI
-    JWT_SECRET = long random string
-    (PORT provided by Render automatically)
-- Visit /login.html
+Run locally
+-----------
+npm install
+npm start
+Open http://localhost:3000/ and enter a room + your name
+
+Deploy on Render
+----------------
+- New → Web Service → connect repo
+- Build Command: npm install
+- Start Command: npm start
+- Enable WebSockets: ON
+- (No environment variables needed)
+- After deploy, share: https://YOUR.onrender.com/?room=ANYTHING
