@@ -1,0 +1,46 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1.0" />
+  <title>Login • Haliport</title>
+  <style>
+    body{margin:0;height:100vh;display:grid;place-items:center;background:#0c0f13;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Arial;color:#e7edf4}
+    .card{background:#141a22;border:1px solid #203041;border-radius:14px;padding:22px;min-width:300px;box-shadow:0 8px 32px rgba(0,0,0,.3)}
+    h1{margin:0 0 10px 0;font-size:20px}
+    input{width:100%;padding:10px 12px;border-radius:10px;border:1px solid #203041;background:#0f141b;color:#e7edf4;outline:none}
+    button{margin-top:12px;width:100%;padding:10px 12px;border-radius:10px;border:0;background:#1b87f3;color:white;cursor:pointer}
+    .err{color:#ff6b6b;font-size:.9rem;margin-top:8px;display:none}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>🍁 Haliport</h1>
+    <p style="color:#9fb0c2;margin:0 0 12px 0">Pick a username to start</p>
+    <input id="username" placeholder="e.g. sarah" />
+    <button id="go">Continue</button>
+    <div id="err" class="err"></div>
+  </div>
+  <script>
+    const btn = document.getElementById('go');
+    const u = document.getElementById('username');
+    const err = document.getElementById('err');
+    btn.onclick = async () => {
+      const name = (u.value||'').trim();
+      if (!name){ err.textContent='Enter a username'; err.style.display='block'; return; }
+      try{
+        const r = await fetch('/login', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({username:name}) });
+        const j = await r.json();
+        if (!r.ok){ throw new Error(j.error||'login_failed'); }
+        localStorage.setItem('token', j.token);
+        location.href = 'index.html?username=' + encodeURIComponent(j.username);
+      }catch(e){
+        err.textContent = 'Login failed';
+        err.style.display = 'block';
+      }
+    };
+    u.addEventListener('keydown', (e)=>{ if (e.key==='Enter') btn.click(); });
+  </script>
+</body>
+</html>

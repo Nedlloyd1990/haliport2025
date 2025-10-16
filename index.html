@@ -1,0 +1,346 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1.0" />
+  <title>Haliport Messenger</title>
+  <style>
+    :root{
+      --bg:#0c0f13; --panel:#141a22; --panel-2:#0f141b; --text:#e7edf4;
+      --muted:#9fb0c2; --accent:#57acff; --assistant:#1d2430; --user:#0d4368;
+      --chip:#223243; --border:#203041; --green:#20c997; --error:#ff6b6b;
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Arial;background:var(--bg);color:var(--text);}
+    .layout{display:grid;grid-template-columns:320px 1fr;height:100vh}
+    .sidebar{background:var(--panel);border-right:1px solid var(--border);display:flex;flex-direction:column;min-width:280px}
+    .side-top{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;border-bottom:1px solid var(--border)}
+    .brand{display:flex;gap:8px;align-items:center;font-weight:700}
+    .brand .leaf{font-size:20px}
+    .icons{display:flex;gap:6px}
+    .i-btn{background:transparent;border:0;color:var(--muted);width:36px;height:36px;display:grid;place-items:center;border-radius:10px;cursor:pointer}
+    .i-btn:hover{background:#1b2330}
+    .search{padding:10px 12px;border-bottom:1px solid var(--border)}
+    .search input{width:100%;padding:10px 12px;border:1px solid var(--border);outline:none;background:var(--panel-2);color:var(--text);border-radius:10px}
+    .list{overflow:auto}
+    .chat-item{display:flex;gap:10px;padding:10px 12px;border-bottom:1px solid rgba(255,255,255,.03);cursor:pointer}
+    .chat-item:hover{background:#121924}
+    .chat-item.active{background:#0f1722}
+    .avatar{width:44px;height:44px;border-radius:50%;display:grid;place-items:center;font-weight:700;background:linear-gradient(135deg,#e53935,#ff6b6b);color:#fff;flex:0 0 auto}
+    .ci-mid{flex:1;min-width:0}
+    .toprow{display:flex;justify-content:space-between;margin-bottom:4px}
+    .name{font-weight:600}
+    .time{color:var(--muted);font-size:.85rem}
+    .preview{color:var(--muted);font-size:.95rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .online{width:10px;height:10px;border-radius:50%;background:#22c55e;display:inline-block;margin-left:6px}
+    .offline{background:#ef4444}
+    .main{display:flex;flex-direction:column;position:relative;background:radial-gradient(90% 70% at 0% 0%,#0f1623 0%,#0b111b 60%,#0b111b 100%)}
+    .header{height:64px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;padding:12px 18px}
+    .peer{display:flex;align-items:center;gap:10px}
+    .peer .avatar{width:36px;height:36px;border-radius:50%}
+    .peer .meta{line-height:1}
+    .peer .meta .who{font-weight:600}
+    .peer .meta .status{font-size:.85rem;color:var(--muted)}
+    .scroll{flex:1;overflow:auto;padding:22px 6%}
+    .date{display:grid;place-items:center;margin:10px 0}
+    .chip{background:#0f1722;border:1px solid var(--border);padding:6px 10px;border-radius:999px;color:var(--muted);font-size:.82rem}
+    .row{display:flex;margin:6px 0}
+    .row.me{justify-content:flex-end}
+    .bubble{max-width:70%;background:var(--assistant);border:1px solid var(--border);padding:10px 12px;border-radius:12px;box-shadow:0 2px 8px rgba(0,0,0,.15)}
+    .row.me .bubble{background:#0e2a49;border-color:#0b3a63}
+    .txt{font-size:1rem;line-height:1.45}
+    .meta-row{display:flex;gap:8px;justify-content:flex-end;color:var(--muted);font-size:.8rem;margin-top:6px}
+    .fileCard{display:flex;gap:10px;align-items:center;background:#0c1624;border:1px dashed #1d3350;padding:10px;border-radius:10px}
+    .fileName{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:280px}
+    .pill{background:#14314d;border:1px solid #214a74;color:#bfe1ff;padding:4px 10px;border-radius:999px;font-size:.8rem;cursor:pointer}
+    .pill:hover{filter:brightness(1.05)}
+    .composer{display:flex;gap:8px;align-items:center;padding:12px 14px;border-top:1px solid var(--border);background:var(--panel)}
+    .attach{background:transparent;border:0;width:40px;height:40px;display:grid;place-items:center;border-radius:10px;color:var(--muted);cursor:pointer}
+    .attach:hover{background:#1b2330}
+    .input{flex:1;background:var(--panel-2);border:1px solid var(--border);border-radius:10px;padding:10px 12px;color:var(--text);outline:none}
+    .send{background:#1b87f3;border:0;color:#fff;padding:10px 16px;border-radius:10px;cursor:pointer}
+    .send:disabled{opacity:.5;cursor:not-allowed}
+    .empty{flex:1;display:grid;place-items:center;color:var(--muted)}
+    .err{color:var(--error);font-size:.9rem;margin-left:8px}
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="side-top">
+        <div class="brand"><span class="leaf">🍁</span> Haliport</div>
+        <div class="icons">
+          <button class="i-btn" id="newChatBtn" title="Request connection">💬</button>
+          <button class="i-btn" id="menuBtn" title="Menu">⋮</button>
+        </div>
+      </div>
+      <div class="search"><input id="search" placeholder="Search or start new chat" /></div>
+      <div class="list" id="chatList"></div>
+    </aside>
+
+    <main class="main">
+      <div class="header" id="header">
+        <div class="peer">
+          <div class="avatar" id="peerA">?</div>
+          <div class="meta">
+            <div class="who" id="peerName">Select a chat</div>
+            <div class="status" id="peerStatus">—</div>
+          </div>
+        </div>
+        <div class="icons">
+          <button class="i-btn" title="Search">🔍</button>
+          <button class="i-btn" title="More">⋮</button>
+        </div>
+      </div>
+
+      <div class="scroll" id="scroll">
+        <div class="empty">Pick someone on the left to start chatting</div>
+      </div>
+
+      <div class="composer">
+        <button class="attach" id="attachBtn" title="Attach file">📎</button>
+        <input class="input" id="msg" placeholder="Type a message" />
+        <button class="send" id="sendBtn">Send</button>
+        <span id="err" class="err" style="display:none"></span>
+      </div>
+    </main>
+  </div>
+
+  <input type="file" id="fileInput" style="display:none" />
+
+  <script>
+    const qp = new URLSearchParams(location.search);
+    const username = qp.get('username');
+    const token = localStorage.getItem('token');
+    if (!username || !token) location.href = 'login.html';
+
+    let socket;
+    let users = [];
+    let activePeer = null;
+    const chats = new Map();
+
+    const els = {
+      chatList: document.getElementById('chatList'),
+      search: document.getElementById('search'),
+      peerA: document.getElementById('peerA'),
+      peerName: document.getElementById('peerName'),
+      peerStatus: document.getElementById('peerStatus'),
+      scroll: document.getElementById('scroll'),
+      msg: document.getElementById('msg'),
+      send: document.getElementById('sendBtn'),
+      attach: document.getElementById('attachBtn'),
+      fileInput: document.getElementById('fileInput'),
+      err: document.getElementById('err'),
+      newChat: document.getElementById('newChatBtn'),
+    };
+
+    function wsURL() {
+      const isHttps = location.protocol === 'https:';
+      return (isHttps ? 'wss://' : 'ws://') + location.host;
+    }
+
+    function connectWS(){
+      socket = new WebSocket(wsURL());
+      socket.onopen = () => {
+        els.err.style.display = 'none';
+        socket.send(JSON.stringify({ type: 'auth', username }));
+      };
+      socket.onmessage = (ev) => {
+        const data = JSON.parse(ev.data);
+        if (data.type === 'userList') {
+          // Make a richer list: mark current user as online=false to avoid showing yourself.
+          users = data.users.filter(u => u.username !== username);
+          renderList();
+          if (activePeer) {
+            const t = users.find(u => u.username === activePeer);
+            setPresence(t);
+          }
+        }
+        if (data.type === 'connectionRequest') {
+          if (confirm(`Connection request from ${data.from}. Accept?`)) {
+            socket.send(JSON.stringify({ type:'connectionResponse', target:data.from, accept:true }));
+          }
+        }
+        if (data.type === 'connectionResponse') {
+          if (data.accept) alert(`Connection with ${data.from} established`);
+        }
+        if (data.type === 'chat') {
+          const peer = data.from;
+          if (!chats.has(peer)) chats.set(peer, []);
+          chats.get(peer).push({ type:'text', direction:'in', text:data.text, ts:new Date().toISOString() });
+          if (activePeer === peer) renderChat(peer);
+          bumpPreview(peer, data.text);
+        }
+        if (data.type === 'fileTransfer') {
+          const peer = data.from;
+          const entry = { id:data.fileId, type:'file', direction:'in', name:data.fileName, mime:data.fileType, size:data.fileSize, ts:new Date().toISOString() };
+          if (!chats.has(peer)) chats.set(peer, []);
+          chats.get(peer).push(entry);
+          if (activePeer === peer) renderChat(peer);
+          bumpPreview(peer, `📎 ${data.fileName}`, entry.ts);
+        }
+        if (data.type === 'fileDownloaded') {
+          const peer = activePeer;
+          if (!peer) return;
+          const items = chats.get(peer) || [];
+          const msg = items.find(m => m.id === data.fileId);
+          if (msg) { msg.downloaded = data.downloadedTime; renderChat(peer); }
+        }
+      };
+      socket.onclose = () => {
+        els.err.textContent = 'Disconnected. Reconnecting…';
+        els.err.style.display = 'inline';
+        setTimeout(connectWS, 1500);
+      };
+      socket.onerror = () => {
+        els.err.textContent = 'WebSocket error';
+        els.err.style.display = 'inline';
+      };
+    }
+    connectWS();
+
+    // Sidebar rendering
+    function renderList(){
+      const q = els.search.value.trim().toLowerCase();
+      els.chatList.innerHTML = users
+        .filter(u => u.username.toLowerCase().includes(q))
+        .map(u => {
+          const last = (chats.get(u.username)||[]).slice(-1)[0];
+          const preview = last ? (last.type==='file' ? `📎 ${last.name}` : last.text) : '—';
+          const time = last ? timeHHMM(last.ts) : '';
+          const active = activePeer === u.username ? 'active' : '';
+          const dot = 'online';
+          return `
+            <div class="chat-item ${active}" data-user="${u.username}">
+              <div class="avatar">${initials(u.username)}</div>
+              <div class="ci-mid">
+                <div class="toprow">
+                  <div class="name">${escapeHTML(u.username)} <span class="${dot} online"></span></div>
+                  <div class="time">${time}</div>
+                </div>
+                <div class="preview">${escapeHTML(preview || '')}</div>
+              </div>
+            </div>`;
+        }).join('');
+      [...els.chatList.querySelectorAll('.chat-item')].forEach(item=>{
+        item.onclick = () => openChat(item.dataset.user);
+      });
+    }
+
+    function openChat(user){
+      activePeer = user;
+      renderList();
+      const target = users.find(u => u.username === user);
+      setPresence(target);
+      renderChat(user);
+    }
+
+    function setPresence(target){
+      if (!target){ els.peerA.textContent='?'; els.peerName.textContent='Select a chat'; els.peerStatus.textContent='—'; return;}
+      els.peerA.textContent = initials(target.username);
+      els.peerName.textContent = target.username;
+      els.peerStatus.textContent = 'Online';
+    }
+
+    function renderChat(user){
+      const items = chats.get(user) || [];
+      if (!items.length){
+        els.scroll.innerHTML = `<div class="date"><div class="chip">Today</div></div>`;
+        return;
+      }
+      let html = '';
+      let currentDay = '';
+      for (const m of items){
+        const day = prettyDay(m.ts);
+        if (day !== currentDay){
+          currentDay = day;
+          html += `<div class="date"><div class="chip">${day}</div></div>`;
+        }
+        const side = m.direction==='out' ? 'row me' : 'row';
+        html += `<div class="${side}"><div class="bubble">`;
+        if (m.type === 'text'){
+          html += `<div class="txt">${escapeHTML(m.text)}</div>`;
+        } else {
+          html += `
+            <div class="fileCard">
+              <div>📎</div>
+              <div class="fileName">${escapeHTML(m.name)}</div>
+              <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
+                ${m.direction==='in'
+                  ? `<button class="pill" onclick="downloadFile('${m.id}','${user}')">Download</button>`
+                  : `<span class="pill">Sent</span>`}
+              </div>
+            </div>`;
+          if (m.downloaded){
+            html += `<div class="meta-row"><span>Downloaded: ${new Date(m.downloaded).toLocaleString()}</span></div>`;
+          }
+        }
+        html += `<div class="meta-row"><span>${timeHHMM(m.ts)}</span></div>`;
+        html += `</div></div>`;
+      }
+      els.scroll.innerHTML = html;
+      els.scroll.scrollTop = els.scroll.scrollHeight;
+    }
+
+    // Compose
+    els.send.onclick = () => {
+      if (!activePeer) return alert('Pick a user first');
+      const text = els.msg.value.trim();
+      if (!text) return;
+      if (!chats.has(activePeer)) chats.set(activePeer, []);
+      chats.get(activePeer).push({ type:'text', direction:'out', text, ts:new Date().toISOString() });
+      // also send over WS so peer receives
+      socket.send(JSON.stringify({ type:'chat', target: activePeer, text }));
+      els.msg.value = '';
+      renderChat(activePeer);
+      bumpPreview(activePeer, text);
+    };
+
+    els.attach.onclick = ()=> els.fileInput.click();
+    els.fileInput.onchange = () => {
+      if (!activePeer) { alert('Pick a user first'); els.fileInput.value=''; return; }
+      const f = els.fileInput.files[0]; if (!f) return;
+      if (f.size > 5*1024*1024){ alert('File size exceeds 5MB limit'); els.fileInput.value=''; return; }
+      const allowed = ['application/pdf','image/jpeg','image/png','text/plain'];
+      if (!allowed.includes(f.type)){ alert('Invalid file type. Allowed: PDF, JPEG, PNG, TXT'); els.fileInput.value=''; return; }
+      const fileId = Date.now().toString();
+      socket.send(JSON.stringify({ type:'fileTransfer', target: activePeer, fileName: f.name, fileType: f.type, fileSize: f.size, fileId }));
+      if (!chats.has(activePeer)) chats.set(activePeer, []);
+      chats.get(activePeer).push({ id:fileId,type:'file',direction:'out',name:f.name,mime:f.type,size:f.size,ts:new Date().toISOString() });
+      renderChat(activePeer);
+      bumpPreview(activePeer, `📎 ${f.name}`);
+      els.fileInput.value='';
+    };
+
+    function downloadFile(id, fromUser){
+      socket.send(JSON.stringify({ type:'fileDownloaded', target: fromUser, fileId: id }));
+      const items = chats.get(fromUser)||[];
+      const msg = items.find(m=>m.id===id);
+      if (msg){ msg.downloaded = new Date().toISOString(); renderChat(fromUser); }
+    }
+    window.downloadFile = downloadFile;
+
+    els.newChat.onclick = () => {
+      const target = prompt('Enter username to connect:');
+      if (target && target !== username){
+        socket.send(JSON.stringify({ type:'requestConnection', target }));
+        alert('Request sent.');
+      }
+    };
+
+    els.search.oninput = renderList;
+
+    function initials(name){ return name.trim().slice(0,2).toUpperCase(); }
+    function escapeHTML(s){ return s.replace(/[&<>\"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',\"'\":'&#39;'}[ch])); }
+    function timeHHMM(iso){ const d = new Date(iso); return d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}); }
+    function prettyDay(iso){
+      const d = new Date(iso); const t=new Date();const y=d.toDateString();const ty=t.toDateString();
+      const yd = new Date(Date.now()-86400000).toDateString();
+      if (y===ty) return 'Today'; if (y===yd) return 'Yesterday'; return d.toLocaleDateString();
+    }
+    function bumpPreview(peer, text, ts = new Date().toISOString()){ renderList(); }
+  </script>
+</body>
+</html>
