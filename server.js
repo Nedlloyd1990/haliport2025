@@ -70,7 +70,8 @@ const upload = multer({ storage, limits: { fileSize: 25 * 1024 * 1024 } });
 // ---------- Rooms & Registry ----------
 const rooms = new Map(); // room -> Set(ws)
 const meta  = new Map(); // ws -> {room, username}
-const reg   = new Map(); // id -> { id, room, type:'chat'|'file', owner, ts, text?, file?{}, filePath?, privatePath?, recalled:false }
+const reg   = new Map(); // id -> { id, room, type, owner, ts, text?, file?, filePath?, privatePath?, recalled:false, expireAt?:number }
+const timers = new Map(); // id -> timeout
 
 // Serve index for any GET (room = path)
 app.get('*', (req, res, next) => {
@@ -81,7 +82,7 @@ app.get('*', (req, res, next) => {
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 
-// Static serving for /uploads (public pre-recall)
+// Public files before recall
 app.use('/uploads', express.static(uploadDir));
 
 // Gated serving for owner-only files after recall
@@ -93,6 +94,44 @@ app.get('/myfile/:id', (req, res) => {
   if (ip !== item.owner) return res.status(403).send('Forbidden');
   res.sendFile(path.resolve(item.privatePath));
 });
+
+// ---------- Core recall helper ----------
+function performRecall(item, note = 'This item was recalled by the sender.') {
+  if (!item || item.recalled) return;
+
+  // If file: move to vault and kill public URL
+  if (item.type === 'file' && item.filePath && !item.privatePath) {
+    try {
+      const dest = path.join(vaultDir, path.basename(item.filePath));
+      fs.renameSync(item.filePath, dest);
+      item.privatePath = dest;
+      item.filePath = null;
+    } catch {
+      try { fs.unlinkSync(item.filePath); } catch {}
+      item.privatePath = null;
+      item.filePath = null;
+    }
+  }
+
+  item.recalled = true;
+  // clear timer if any
+  const t = timers.get(item.id);
+  if (t) { clearTimeout(t); timers.delete(item.id); }
+
+  // Receiver view: tombstone + system line; hide original
+  sendTo(item.room, (m) => m.username !== item.owner, {
+    type: 'recalled',
+    id: item.id,
+    sys: note
+  });
+
+  // Sender view: keep original, add system line; if file, update to gated URL
+  const ownerNote = { type: 'recalled_owner', id: item.id, sys: 'You recalled this. The other person can no longer see it.' };
+  if (item.type === 'file' && item.privatePath) {
+    ownerNote.newUrl = `/myfile/${item.id}`;
+  }
+  sendTo(item.room, (m) => m.username === item.owner, ownerNote);
+}
 
 // ---------- WebSockets ----------
 wss.on('connection', (ws, req) => {
@@ -127,47 +166,16 @@ wss.on('connection', (ws, req) => {
       return;
     }
 
-    // ---- recall ----
+    // ---- manual recall ----
     if (data.type === 'recall' && data.id) {
       const id = String(data.id);
       const item = reg.get(id);
       if (!item || item.room !== room) return;
-
       if (item.owner !== username) {
         ws.send(JSON.stringify({ type:'error', message:'Only the sender can recall this item.' }));
         return;
       }
-
-      // File: move to vault (owner-only), kill public URL
-      if (item.type === 'file' && item.filePath && !item.privatePath) {
-        try {
-          const dest = path.join(vaultDir, path.basename(item.filePath));
-          fs.renameSync(item.filePath, dest);
-          item.privatePath = dest;
-          item.filePath = null;
-        } catch {
-          try { fs.unlinkSync(item.filePath); } catch {}
-          item.privatePath = null;
-          item.filePath = null;
-        }
-      }
-
-      item.recalled = true;
-
-      // Receiver: tombstone + system note (hide original)
-      sendTo(room, (m) => m.username !== item.owner, {
-        type: 'recalled',
-        id,
-        sys: 'This item was recalled by the sender.'
-      });
-
-      // Sender: keep original, add system line; if file, update to gated URL
-      const ownerNote = { type: 'recalled_owner', id, sys: 'You recalled this. The other person can no longer see it.' };
-      if (item.type === 'file' && item.privatePath) {
-        ownerNote.newUrl = `/myfile/${id}`;
-      }
-      sendTo(room, (m) => m.username === item.owner, ownerNote);
-
+      performRecall(item, 'This item was recalled by the sender.');
       return;
     }
   });
@@ -182,7 +190,7 @@ wss.on('connection', (ws, req) => {
   });
 });
 
-// ---------- Upload endpoint ----------
+// ---------- Upload endpoint with auto-recall ----------
 app.post('/upload/:room', upload.array('file', 5), (req, res) => {
   const room = (req.params.room || '').trim() || 'chat';
   const set = rooms.get(room);
@@ -191,15 +199,33 @@ app.post('/upload/:room', upload.array('file', 5), (req, res) => {
   }
   const from = getClientIP(req);
 
+  // Multer puts non-file fields into req.body
+  // expect optional expireMs (single number for all files in this request)
+  let expireMs = 0;
+  if (req.body && req.body.expireMs) {
+    const n = parseInt(String(req.body.expireMs), 10);
+    if (!Number.isNaN(n) && n > 0) expireMs = Math.min(n, 1000 * 60 * 60 * 24 * 365); // clamp to <=1y
+  }
+
+  const now = Date.now();
+
   const files = (req.files || []).map(f => {
     const id = uid();
-    const ts = Date.now();
+    const ts = now;
     const record = {
       id, room, type:'file', owner: from, ts,
       file: { name: f.originalname, savedAs: path.basename(f.path), size: f.size, mime: f.mimetype },
       filePath: f.path, privatePath: null, recalled:false
     };
+    if (expireMs > 0) record.expireAt = ts + expireMs;
     reg.set(id, record);
+
+    // schedule auto recall if needed
+    if (record.expireAt) {
+      const delay = Math.max(0, record.expireAt - Date.now());
+      const t = setTimeout(() => performRecall(record, 'This item was auto-recalled by the sender.'), delay);
+      timers.set(id, t);
+    }
 
     const payload = {
       type:'file', id, from, ts,
@@ -209,17 +235,18 @@ app.post('/upload/:room', upload.array('file', 5), (req, res) => {
         size: f.size,
         mime: f.mimetype,
         url: `/uploads/${path.basename(f.path)}`
-      }
+      },
+      expireAt: record.expireAt || null
     };
     broadcast(room, payload);
     return payload.file;
   });
 
-  res.json({ ok:true, files });
+  res.json({ ok:true, files, expireAt: expireMs ? now + expireMs : null });
 });
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-  console.log('1:1 chat with sender-only retention & recall listening on', PORT);
+  console.log('1:1 chat with uploads, manual & auto recall listening on', PORT);
   console.log('Open http://localhost:'+PORT+'/your-room');
 });
