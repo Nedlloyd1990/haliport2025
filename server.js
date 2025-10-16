@@ -15,8 +15,8 @@ app.use(cors());
 app.use(express.static(__dirname)); // serves index.html
 
 // ---------- Dirs ----------
-const uploadDir = path.join(__dirname, 'uploads');     // public before recall
-const vaultDir  = path.join(__dirname, 'vault');       // private after recall (owner-only)
+const uploadDir = path.join(__dirname, 'uploads'); // public before recall
+const vaultDir  = path.join(__dirname, 'vault');   // private after recall (owner-only)
 for (const d of [uploadDir, vaultDir]) if (!fs.existsSync(d)) fs.mkdirSync(d);
 
 // ---------- Utils ----------
@@ -68,9 +68,9 @@ const storage = multer.diskStorage({
 const upload = multer({ storage, limits: { fileSize: 25 * 1024 * 1024 } });
 
 // ---------- Rooms & Registry ----------
-const rooms = new Map();   // room -> Set(ws)
-const meta  = new Map();   // ws -> {room, username}
-const reg   = new Map();   // id -> { id, room, type:'chat'|'file', owner, ts, text?, file?{name,savedAs,size,mime}, filePath?, recalled:false, privatePath? }
+const rooms = new Map(); // room -> Set(ws)
+const meta  = new Map(); // ws -> {room, username}
+const reg   = new Map(); // id -> { id, room, type:'chat'|'file', owner, ts, text?, file?{}, filePath?, privatePath?, recalled:false }
 
 // Serve index for any GET (room = path)
 app.get('*', (req, res, next) => {
@@ -91,11 +91,10 @@ app.get('/myfile/:id', (req, res) => {
   if (!item || item.type !== 'file' || !item.privatePath) return res.status(404).end();
   const ip = getClientIP(req);
   if (ip !== item.owner) return res.status(403).send('Forbidden');
-  // stream file
   res.sendFile(path.resolve(item.privatePath));
 });
 
-// ---------- WS ----------
+// ---------- WebSockets ----------
 wss.on('connection', (ws, req) => {
   const room = roomFromReq(req);
   const username = getClientIP(req);
@@ -139,15 +138,14 @@ wss.on('connection', (ws, req) => {
         return;
       }
 
-      // If file: move to vault (owner-only), kill public access
+      // File: move to vault (owner-only), kill public URL
       if (item.type === 'file' && item.filePath && !item.privatePath) {
         try {
           const dest = path.join(vaultDir, path.basename(item.filePath));
           fs.renameSync(item.filePath, dest);
-          item.privatePath = dest;     // now gated
-          item.filePath = null;        // no longer public
+          item.privatePath = dest;
+          item.filePath = null;
         } catch {
-          // If move fails, fall back to unlink (last resort)
           try { fs.unlinkSync(item.filePath); } catch {}
           item.privatePath = null;
           item.filePath = null;
@@ -156,14 +154,14 @@ wss.on('connection', (ws, req) => {
 
       item.recalled = true;
 
-      // Receiver view: show tombstone + system line; hide original
+      // Receiver: tombstone + system note (hide original)
       sendTo(room, (m) => m.username !== item.owner, {
         type: 'recalled',
         id,
         sys: 'This item was recalled by the sender.'
       });
 
-      // Sender view: keep original bubble, add system line; if file, update to gated URL
+      // Sender: keep original, add system line; if file, update to gated URL
       const ownerNote = { type: 'recalled_owner', id, sys: 'You recalled this. The other person can no longer see it.' };
       if (item.type === 'file' && item.privatePath) {
         ownerNote.newUrl = `/myfile/${id}`;
