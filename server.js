@@ -6,17 +6,19 @@ import { WebSocketServer } from 'ws';
 import cors from 'cors';
 import multer from 'multer';
 import fs from 'fs';
+import crypto from 'crypto';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname  = path.dirname(__filename);
 
 const app = express();
 app.use(cors());
+app.use(express.json());           // for /unlock
 app.use(express.static(__dirname)); // serves index.html
 
 // ---------- Dirs ----------
-const uploadDir = path.join(__dirname, 'uploads'); // public before recall
-const vaultDir  = path.join(__dirname, 'vault');   // private after recall (owner-only)
+const uploadDir = path.join(__dirname, 'uploads'); // public before recall (non-protected files)
+const vaultDir  = path.join(__dirname, 'vault');   // private (owner-only & protected files)
 for (const d of [uploadDir, vaultDir]) if (!fs.existsSync(d)) fs.mkdirSync(d);
 
 // ---------- Utils ----------
@@ -58,10 +60,15 @@ function sendTo(room, predicate, payload){
     if (m && predicate(m)) { try { ws.send(s); } catch {} }
   }
 }
+function sha256(s){ return crypto.createHash('sha256').update(s).digest('hex'); }
 
 // ---------- Multer (25 MB) ----------
 const storage = multer.diskStorage({
-  destination: (_req, _file, cb) => cb(null, uploadDir),
+  destination: (req, file, cb) => {
+    // If password-protected, save directly to vault (never public)
+    const toVault = (req.body?.pw && String(req.body.pw).trim().length > 0);
+    cb(null, toVault ? vaultDir : uploadDir);
+  },
   filename: (_req, file, cb) => {
     const safe = file.originalname.replace(/[^\w.\-()+\s]/g, '_');
     cb(null, Date.now() + '_' + safe);
@@ -70,9 +77,28 @@ const storage = multer.diskStorage({
 const upload = multer({ storage, limits: { fileSize: 25 * 1024 * 1024 } });
 
 // ---------- Rooms & Registry ----------
+/**
+ * reg item:
+ * { id, room, type:'chat'|'file', owner, ts,
+ *   // chat
+ *   text?,
+ *   // files
+ *   file?: { name,savedAs,size,mime },
+ *   filePath?: string | null,        // public path in uploads
+ *   privatePath?: string | null,     // path in vault
+ *   recalled:false,
+ *   expiresAt?: number,
+ *   timer?: Timeout,
+ *   // protection
+ *   protected?: boolean,
+ *   salt?: string,
+ *   pwHash?: string,
+ *   unlockedFor?: string | null      // receiver IP after correct password
+ * }
+ */
 const rooms = new Map(); // room -> Set(ws)
 const meta  = new Map(); // ws -> {room, username}
-const reg   = new Map(); // id -> { id, room, type:'chat'|'file', owner, ts, text?, file?{}, filePath?, privatePath?, recalled:false, expiresAt?:number, timer?:NodeJS.Timeout }
+const reg   = new Map(); // id -> item
 
 // Serve index for any GET (room = path)
 app.get('*', (req, res, next) => {
@@ -86,7 +112,7 @@ const wss = new WebSocketServer({ server });
 // Static serving for /uploads (public pre-recall)
 app.use('/uploads', express.static(uploadDir));
 
-// Gated serving for owner-only files after recall
+// Gated serving for owner-only files
 app.get('/myfile/:id', (req, res) => {
   const id = String(req.params.id || '');
   const item = reg.get(id);
@@ -96,9 +122,21 @@ app.get('/myfile/:id', (req, res) => {
   res.sendFile(path.resolve(item.privatePath));
 });
 
+// Gated serving for receiver after successful unlock
+app.get('/recvfile/:id', (req, res) => {
+  const id = String(req.params.id || '');
+  const item = reg.get(id);
+  if (!item || item.type !== 'file' || !item.privatePath) return res.status(404).end();
+  const ip = getClientIP(req);
+  if (ip !== item.unlockedFor) return res.status(403).send('Forbidden');
+  res.sendFile(path.resolve(item.privatePath));
+});
+
 // ---------- Recall helpers ----------
 function moveFileToVault(item){
-  if (item.type !== 'file' || !item.filePath || item.privatePath) return;
+  if (item.type !== 'file') return;
+  if (item.privatePath) return; // already in vault
+  if (!item.filePath) return;
   try {
     const dest = path.join(vaultDir, path.basename(item.filePath));
     fs.renameSync(item.filePath, dest);
@@ -117,8 +155,9 @@ function performRecall(id){
   item.recalled = true;
   if (item.timer) { clearTimeout(item.timer); item.timer = undefined; }
 
-  // For files: kill public access & keep for owner
+  // Files: ensure in vault and inaccessible to receiver
   if (item.type === 'file') moveFileToVault(item);
+  item.unlockedFor = null;
 
   // Notify both sides with different views
   sendTo(item.room, (m) => m.username !== item.owner, {
@@ -128,6 +167,7 @@ function performRecall(id){
   });
 
   const ownerNote = { type: 'recalled_owner', id, sys: 'You recalled this. The other person can no longer see it.' };
+  // Owner link (if file & kept)
   if (item.type === 'file' && item.privatePath) ownerNote.newUrl = `/myfile/${id}`;
   sendTo(item.room, (m) => m.username === item.owner, ownerNote);
 }
@@ -195,7 +235,7 @@ wss.on('connection', (ws, req) => {
   });
 });
 
-// ---------- Upload endpoint (supports auto-recall TTL) ----------
+// ---------- Upload endpoint (TTL + optional password) ----------
 app.post('/upload/:room', upload.array('file', 5), (req, res) => {
   const room = (req.params.room || '').trim() || 'chat';
   const set = rooms.get(room);
@@ -204,19 +244,33 @@ app.post('/upload/:room', upload.array('file', 5), (req, res) => {
   }
   const from = getClientIP(req);
 
-  // TTL from form field 'ttl' (seconds)
-  const ttlSec = clamp(parseInt((req.body?.ttl ?? '0'), 10) || 0, 0, 31*24*3600); // cap ~31 days
+  const ttlSec  = clamp(parseInt((req.body?.ttl ?? '0'), 10) || 0, 0, 31*24*3600); // <= 31 days
+  const pwRaw   = (req.body?.pw && String(req.body.pw).trim()) || '';
 
   const files = (req.files || []).map(f => {
     const id = uid();
     const ts = now();
+
     const record = {
       id, room, type:'file', owner: from, ts,
-      file: { name: f.originalname, savedAs: path.basename(f.path), size: f.size, mime: f.mimetype },
-      filePath: f.path, privatePath: null, recalled:false
+      file: { name: f.originalname, savedAs: path.basename(f.filename || f.path), size: f.size, mime: f.mimetype },
+      // if pw present, multer already saved to vaultDir
+      filePath: pwRaw ? null : f.path,
+      privatePath: pwRaw ? f.path : null,
+      recalled:false,
+      protected: !!pwRaw,
+      salt: null,
+      pwHash: null,
+      unlockedFor: null
     };
 
-    // If TTL provided, set expiry & schedule
+    // Auth for password-protected
+    if (pwRaw) {
+      record.salt = uid();
+      record.pwHash = sha256(record.salt + '|' + pwRaw);
+    }
+
+    // TTL
     if (ttlSec > 0) {
       record.expiresAt = ts + (ttlSec * 1000);
       scheduleAutoRecall(record);
@@ -224,26 +278,69 @@ app.post('/upload/:room', upload.array('file', 5), (req, res) => {
 
     reg.set(id, record);
 
-    const payload = {
+    // Common payload for BOTH sides (no public URL if protected)
+    const basePayload = {
       type:'file', id, from, ts,
       file: {
-        name: f.originalname,
-        savedAs: path.basename(f.path),
-        size: f.size,
-        mime: f.mimetype,
-        url: `/uploads/${path.basename(f.path)}`
+        name: record.file.name,
+        savedAs: record.file.savedAs,
+        size: record.file.size,
+        mime: record.file.mime,
+        url: pwRaw ? null : `/uploads/${path.basename(record.filePath)}`,
+        protected: !!pwRaw
       }
     };
-    if (record.expiresAt) payload.expiresAt = record.expiresAt;
-    broadcast(room, payload);
-    return payload.file;
+    if (record.expiresAt) basePayload.expiresAt = record.expiresAt;
+
+    // Broadcast minimal to both
+    broadcast(room, basePayload);
+
+    // Owner-only augmentation:
+    const ownerAug = { type:'file_owner', id };
+    if (record.privatePath) ownerAug.ownerUrl = `/myfile/${id}`;
+    sendTo(room, (m) => m.username === from, ownerAug);
+
+    return basePayload.file;
   });
 
   res.json({ ok:true, files });
 });
 
+// ---------- Unlock endpoint (receiver submits password) ----------
+app.post('/unlock/:id', (req, res) => {
+  const id = String(req.params.id || '');
+  const pwd = (req.body?.password && String(req.body.password)) || '';
+  const item = reg.get(id);
+  if (!item || item.type !== 'file' || !item.protected || item.recalled) {
+    return res.status(400).json({ ok:false, error:'Invalid item' });
+  }
+  const ip = getClientIP(req);
+  // Only the receiver (not owner) can unlock
+  if (ip === item.owner) return res.status(403).json({ ok:false, error:'Owner does not need to unlock' });
+
+  const ok = (sha256(item.salt + '|' + pwd) === item.pwHash);
+
+  if (!ok) {
+    // wrong password => auto recall immediately
+    performRecall(id);
+    return res.status(403).json({ ok:false, error:'Incorrect password. File was recalled.' });
+  }
+
+  // correct: allow this receiver IP and notify them with a link
+  item.unlockedFor = ip;
+
+  // Send to that receiver only
+  sendTo(item.room, (m) => m.username === ip, {
+    type: 'file_unlocked',
+    id,
+    url: `/recvfile/${id}`
+  });
+
+  return res.json({ ok:true });
+});
+
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-  console.log('1:1 chat with file transfer + recall + auto-recall countdown listening on', PORT);
+  console.log('1:1 chat with file transfer + recall + auto-recall + password-protect is listening on', PORT);
   console.log('Open http://localhost:'+PORT+'/your-room');
 });
