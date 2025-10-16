@@ -4,16 +4,40 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { WebSocketServer } from 'ws';
 import cors from 'cors';
+import multer from 'multer';
+import fs from 'fs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname  = path.dirname(__filename);
 
 const app = express();
 app.use(cors());
-app.use(express.static(__dirname)); // serves index.html and assets
+app.use(express.static(__dirname)); // serves index.html, /uploads/*, etc.
 
-// Serve index.html for any path (so /abc becomes a room called "abc")
-app.get('*', (req, res) => {
+// ==============================
+// Uploads (Multer) — 25 MB/file
+// ==============================
+const uploadDir = path.join(__dirname, 'uploads');
+if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir);
+
+const storage = multer.diskStorage({
+  destination: (_req, _file, cb) => cb(null, uploadDir),
+  filename: (_req, file, cb) => {
+    // timestamp + original name (basic sanitation)
+    const safe = file.originalname.replace(/[^\w.\-()+\s]/g, '_');
+    cb(null, Date.now() + '_' + safe);
+  }
+});
+
+const upload = multer({
+  storage,
+  limits: { fileSize: 25 * 1024 * 1024 } // 25 MB
+});
+
+// Serve index.html for any GET path (so /abc is room "abc")
+app.get('*', (req, res, next) => {
+  // Let the upload route handle its own POST (doesn't conflict with GET *)
+  if (req.method !== 'GET') return next();
   res.sendFile(path.join(__dirname, 'index.html'));
 });
 
@@ -58,6 +82,9 @@ function broadcast(room, obj) {
   }
 }
 
+// ==============
+// WebSockets
+// ==============
 wss.on('connection', (ws, req) => {
   const room = roomFromReq(req);
   const username = getClientIP(req);
@@ -98,8 +125,46 @@ wss.on('connection', (ws, req) => {
   });
 });
 
+// ======================
+// HTTP upload endpoint
+// ======================
+app.post('/upload/:room', upload.array('file', 5), (req, res) => {
+  // Enforce 1:1: only allow if the room exists and has <=2 members
+  const room = (req.params.room || '').trim() || 'chat';
+  const set = rooms.get(room);
+  if (!set || set.size === 0 || set.size > 2) {
+    return res.status(400).json({ ok:false, error:'Room not active or full' });
+  }
+
+  // Identify uploader (best-effort IP)
+  const from = getClientIP(req);
+
+  const files = (req.files || []).map(f => ({
+    name: f.originalname,
+    savedAs: path.basename(f.path),
+    size: f.size,
+    mime: f.mimetype,
+    url: `/uploads/${path.basename(f.path)}`
+  }));
+
+  // Broadcast one "file" event per file
+  for (const f of files) {
+    broadcast(room, {
+      type: 'file',
+      from,
+      ts: Date.now(),
+      file: f
+    });
+  }
+
+  res.json({ ok:true, files });
+});
+
+// Make sure /uploads is reachable
+app.use('/uploads', express.static(uploadDir));
+
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-  console.log('1:1 chat server listening on', PORT);
+  console.log('1:1 chat server with file transfer listening on', PORT);
   console.log('Open http://localhost:'+PORT+'/your-room to start chatting');
 });
