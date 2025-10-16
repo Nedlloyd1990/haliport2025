@@ -1,153 +1,89 @@
 
-import 'dotenv/config';
 import express from 'express';
 import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import cors from 'cors';
-import mongoose from 'mongoose';
-import jwt from 'jsonwebtoken';
 import { WebSocketServer } from 'ws';
+import cors from 'cors';
 
-// ====== Config ======
 const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const __dirname  = path.dirname(__filename);
 
-const PORT = process.env.PORT || 3000;
-const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-me';
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/haliport';
-
-// ====== DB ======
-await mongoose.connect(MONGODB_URI, { dbName: 'haliport' });
-
-const userSchema = new mongoose.Schema({
-  username: { type: String, unique: true, required: true },
-  createdAt: { type: Date, default: Date.now }
-});
-const User = mongoose.model('User', userSchema);
-
-// ====== App / HTTP ======
 const app = express();
 app.use(cors());
-app.use(express.json());
-app.use(express.static(__dirname)); // serves index.html + login.html by default
-
-// Simple login endpoint: upsert user and return a JWT
-app.post('/login', async (req, res) => {
-  try {
-    const { username } = req.body || {};
-    if (!username || typeof username !== 'string' || !username.trim()) {
-      return res.status(400).json({ error: 'username required' });
-    }
-    const uname = username.trim();
-    await User.updateOne({ username: uname }, { $setOnInsert: { username: uname } }, { upsert: true });
-    const token = jwt.sign({ username: uname }, JWT_SECRET, { expiresIn: '7d' });
-    res.json({ token, username: uname });
-  } catch (e) {
-    console.error('Login error', e);
-    res.status(500).json({ error: 'server_error' });
-  }
-});
+app.use(express.static(__dirname)); // serves index.html
 
 const server = http.createServer(app);
-
-// ====== WebSocket ======
 const wss = new WebSocketServer({ server });
 
-// In-memory presence (for demo). In production you’d persist.
-const clients = new Map(); // ws -> { username }
-function broadcastUserList() {
-  const list = [...clients.values()].map(c => c.username);
-  // Build [{username, online:true}]
-  const payload = {
-    type: 'userList',
-    users: list.map(u => ({ username: u, online: true }))
-  };
-  for (const ws of clients.keys()) {
-    safeSend(ws, payload);
-  }
-}
+/**
+ * Very simple room server:
+ * - Clients send: {type:'join', room, username}
+ * - Then send:    {type:'chat', text}
+ * - We keep everything in memory (no DB). When server restarts, history is lost.
+ * - "1:1" policy: only TWO people can be in a room at once. A 3rd gets rejected.
+ */
+const rooms = new Map(); // roomId -> Set(ws)
+const meta  = new Map(); // ws -> {room, username}
 
-function safeSend(ws, obj) {
-  try { ws.send(JSON.stringify(obj)); } catch {}
+function broadcast(room, obj) {
+  const set = rooms.get(room);
+  if (!set) return;
+  for (const client of set) {
+    try { client.send(JSON.stringify(obj)); } catch {}
+  }
 }
 
 wss.on('connection', (ws) => {
-  // client should immediately send {type:'auth', username}
-  ws.on('message', async (msg) => {
+  ws.on('message', (buf) => {
     let data;
-    try { data = JSON.parse(msg.toString()); } catch { return; }
+    try { data = JSON.parse(buf); } catch { return; }
 
-    if (data.type === 'auth') {
-      const { username } = data;
-      if (!username) return;
-      // Optional: verify JWT if you pass it (not required for demo)
-      clients.set(ws, { username });
-      broadcastUserList();
-      return;
-    }
+    if (data.type === 'join') {
+      const { room, username } = data;
+      if (!room || !username) return;
 
-    // Relay helpers
-    const relay = (predicate, payloadBuilder) => {
-      for (const [client, meta] of clients.entries()) {
-        if (predicate(meta)) {
-          safeSend(client, payloadBuilder(meta));
-        }
+      const set = rooms.get(room) || new Set();
+      if (set.size >= 2) {
+        ws.send(JSON.stringify({ type:'room_full', message:'This private room already has two people.' }));
+        ws.close(4001, 'room full');
+        return;
       }
-    };
 
-    // Request connection
-    if (data.type === 'requestConnection') {
-      const from = clients.get(ws)?.username;
-      if (!from) return;
-      const target = data.target;
-      relay(m => m.username === target, () => ({ type:'connectionRequest', from }));
+      set.add(ws);
+      rooms.set(room, set);
+      meta.set(ws, { room, username });
+
+      ws.send(JSON.stringify({ type:'joined', room, users: [...set].map(c => meta.get(c)?.username).filter(Boolean) }));
+      broadcast(room, { type:'presence', users: [...set].map(c => meta.get(c)?.username).filter(Boolean) });
       return;
     }
 
-    // Connection response
-    if (data.type === 'connectionResponse') {
-      const from = clients.get(ws)?.username;
-      if (!from) return;
-      const target = data.target;
-      relay(m => m.username === target, () => ({ type:'connectionResponse', from, accept: !!data.accept }));
-      return;
-    }
-
-    // Text chat
     if (data.type === 'chat') {
-      const from = clients.get(ws)?.username;
-      if (!from) return;
-      const { target, text } = data;
-      relay(m => m.username === target, () => ({ type:'chat', from, text }));
-      return;
-    }
-
-    // File meta transfer (demo relays metadata only)
-    if (data.type === 'fileTransfer') {
-      const from = clients.get(ws)?.username;
-      if (!from) return;
-      const { target, fileName, fileType, fileSize, fileId } = data;
-      relay(m => m.username === target, () => ({ type:'fileTransfer', from, fileName, fileType, fileSize, fileId }));
-      return;
-    }
-
-    // File downloaded ack
-    if (data.type === 'fileDownloaded') {
-      const from = clients.get(ws)?.username;
-      if (!from) return;
-      const { target, fileId } = data;
-      relay(m => m.username === target, () => ({ type:'fileDownloaded', fileId, downloadedTime: new Date().toISOString() }));
+      const info = meta.get(ws);
+      if (!info) return;
+      const { room, username } = info;
+      const msg = { type:'chat', from: username, text: String(data.text||'').slice(0, 2000), ts: Date.now() };
+      broadcast(room, msg);
       return;
     }
   });
 
   ws.on('close', () => {
-    clients.delete(ws);
-    broadcastUserList();
+    const info = meta.get(ws);
+    if (!info) return;
+    const { room } = info;
+    meta.delete(ws);
+    const set = rooms.get(room);
+    if (!set) return;
+    set.delete(ws);
+    if (set.size === 0) rooms.delete(room);
+    else broadcast(room, { type:'presence', users: [...set].map(c => meta.get(c)?.username).filter(Boolean) });
   });
 });
 
+const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-  console.log('Haliport server listening on', PORT);
+  console.log('One-to-one chat server listening on', PORT);
+  console.log('Open http://localhost:'+PORT+'/ in your browser');
 });
