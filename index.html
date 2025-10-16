@@ -5,22 +5,29 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>🍁 Haliport — Private 1:1 Chat</title>
 <style>
-  :root{ --bg:#0c0f13; --panel:#141a22; --panel2:#0f141b; --text:#e7edf4; --muted:#9fb0c2; --accent:#57acff; --border:#203041; }
-  *{box-sizing:border-box} html,body{height:100%} body{margin:0;background:var(--bg);color:var(--text);font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Arial}
+  :root{
+    --bg:#0b0f14; --panel:#121923; --panel2:#0f151e; --text:#e9f0f7; --muted:#9fb0c2; --accent:#57acff; --border:#1f2b3b;
+    --ring:#73b6ff; --danger:#ff6b6b; --glass:rgba(255,255,255,.06);
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Arial}
+
   .app{display:flex;flex-direction:column;min-height:100vh}
   .header{height:64px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;padding:12px 18px;background:var(--panel)}
   .scroll{flex:1;overflow:auto;padding:18px}
-  .row{display:flex;margin:8px 0;position:relative}
+  .row{display:flex;margin:10px 0;position:relative}
   .me{justify-content:flex-end}
-  .bubble{max-width:900px;width:fit-content;background:#1d2430;border:1px solid var(--border);padding:12px 14px;border-radius:14px;font-size:1.05rem;line-height:1.5;position:relative}
-  .me .bubble{background:#0e2a49;border-color:#0b3a63}
+  .bubble{max-width:900px;width:fit-content;background:#172131;border:1px solid var(--border);padding:12px 14px;border-radius:16px;font-size:1.05rem;line-height:1.5;position:relative}
+  .me .bubble{background:#0f2744;border-color:#133659}
   .meta{color:#9fb0c2;font-size:.85rem;margin-top:6px;text-align:right}
+
   .composer{position:sticky;bottom:0;display:flex;gap:12px;align-items:flex-end;border-top:1px solid var(--border);padding:14px 16px;background:var(--panel)}
   .textarea{flex:1;min-height:56px;max-height:220px;padding:14px;border-radius:14px;border:1px solid var(--border);background:var(--panel2);color:var(--text);resize:vertical;font-size:1.05rem;line-height:1.5;outline:none}
   .send{background:#1b87f3;border:0;color:#fff;padding:14px 22px;border-radius:14px;cursor:pointer;font-size:1rem}
   .iconbtn{border:1px solid var(--border);background:var(--panel2);color:var(--text);border-radius:12px;cursor:pointer;height:48px;width:48px;display:grid;place-items:center}
   .filecard{display:flex;align-items:center;gap:10px}
-  .filethumb{max-width:360px;border-radius:10px;display:block}
+  .filethumb{max-width:360px;border-radius:12px;display:block}
   .filename{word-break:break-all}
   .tip{color:#9fb0c2;font-size:.9rem;margin:0 18px 8px}
 
@@ -31,56 +38,62 @@
 
   /* three-dot (kebab) */
   .kebab{
-    position:absolute; top:6px; right:6px;
-    width:30px; height:30px; display:grid; place-items:center;
-    font-size:18px; line-height:0;
-    background:rgba(255,255,255,.08);
-    border:1px solid rgba(255,255,255,.18);
-    border-radius:10px; color:#e7edf4; cursor:pointer;
-    opacity:.55;
-    transition:opacity .15s ease, transform .15s ease, background .15s ease;
+    position:absolute; top:6px; right:6px; width:32px; height:32px; display:grid; place-items:center;
+    font-size:18px; background:var(--glass); border:1px solid rgba(255,255,255,.18);
+    border-radius:10px; color:#e7edf4; cursor:pointer; opacity:.7;
+    transition:opacity .15s ease, transform .15s ease, background .15s ease, box-shadow .15s ease;
     box-shadow:0 2px 10px rgba(0,0,0,.25);
   }
-  .bubble:hover .kebab{ opacity:1; transform:translateY(-1px); }
+  .bubble:hover .kebab{ opacity:1; transform:translateY(-1px); box-shadow:0 6px 20px rgba(0,0,0,.3); }
   .kebab:hover{ background:rgba(255,255,255,.12); }
 
   .menu{
-    position:absolute; top:40px; right:6px;
-    background:#0e1420; border:1px solid var(--border);
-    border-radius:10px; box-shadow:0 10px 30px rgba(0,0,0,.35);
-    display:none; min-width:160px; z-index:5;
+    position:absolute; top:42px; right:6px; background:#0e1622; border:1px solid var(--border);
+    border-radius:12px; box-shadow:0 12px 30px rgba(0,0,0,.4); display:none; min-width:170px; z-index:5;
   }
   .menu.open{ display:block }
-  .menu button{
-    width:100%; text-align:left; padding:10px 12px;
-    background:transparent; border:0; color:#e7edf4; cursor:pointer; font-size:.95rem;
-  }
-  .menu button:hover{ background:#141a26 }
-  .tomb { font-style:italic; color:#cfd9e6 }
+  .menu button{ width:100%; text-align:left; padding:10px 12px; background:transparent; border:0; color:#e7edf4; cursor:pointer; font-size:.95rem }
+  .menu button:hover{ background:#141c28 }
 
-  /* countdown */
-  .expiry{ color:#ff6b6b; font-size:.85rem; margin-top:4px; }
+  .tomb { font-style:italic; color:#d2dcea }
+  .expiry{ color:var(--danger); font-size:.85rem; margin-top:6px }
 
-  /* Attachment Options panel */
-  .attach-panel{
-    position:fixed; left:50%; bottom:88px; transform:translateX(-50%);
-    background:#111825; border:1px solid var(--border);
-    border-radius:14px; box-shadow:0 18px 50px rgba(0,0,0,.5);
-    padding:14px; display:none; gap:12px; align-items:center; z-index:20;
-    min-width: 520px;
+  .badge{ display:inline-flex; align-items:center; gap:6px; padding:3px 10px; border-radius:999px; font-size:.78rem;
+          background:#10263e; color:#b8d5ff; border:1px solid #1c3a5e }
+
+  /* ======= Attachment Sheet ======= */
+  .overlay{ position:fixed; inset:0; background:rgba(0,0,0,.45); display:none; z-index:40; }
+  .overlay.open{ display:block; }
+  .sheet{
+    position:fixed; left:50%; top:50%; transform:translate(-50%,-50%);
+    width:min(680px, 94vw); background:#0f1622; border:1px solid var(--border); border-radius:20px;
+    box-shadow:0 30px 100px rgba(0,0,0,.65); padding:18px; display:none; z-index:41;
   }
-  .attach-panel.open{ display:flex; flex-wrap:wrap; }
-  .attach-panel .group{ display:flex; align-items:center; gap:8px; }
-  .attach-panel .btn{
+  .sheet.open{ display:block; }
+  .sheet h3{ margin:8px 0 14px; font-weight:700; letter-spacing:.2px }
+  .choices{ display:grid; grid-template-columns:1fr 1fr; gap:12px; margin:12px 0 6px }
+  .choice{
+    background:linear-gradient(180deg,#0f1927,#0d131d); border:1px solid var(--border);
+    border-radius:16px; padding:16px; cursor:pointer; display:flex; flex-direction:column; gap:8px;
+    transition:transform .12s ease, box-shadow .12s ease, border-color .12s ease;
+  }
+  .choice:hover{ transform:translateY(-2px); box-shadow:0 12px 30px rgba(0,0,0,.4); border-color:#27405e }
+  .choice .title{ font-weight:600 }
+  .choice .desc{ color:#a9bdd2; font-size:.9rem }
+  .divider{ height:1px; background:var(--border); margin:12px 0 }
+
+  .panel{ display:none; gap:10px; align-items:center; flex-wrap:wrap; }
+  .panel.active{ display:flex }
+  .select{ background:#101725; color:#e7edf4; border:1px solid var(--border); border-radius:12px; padding:8px 10px; }
+  .input{ background:#101725; color:#e7edf4; border:1px solid var(--border); border-radius:12px; padding:9px 12px; }
+  .actions{ display:flex; gap:10px; justify-content:flex-end; margin-top:14px }
+  .btn{
     border:1px solid var(--border); background:#1b87f3; color:#fff;
-    padding:8px 12px; border-radius:10px; cursor:pointer;
+    padding:10px 14px; border-radius:12px; cursor:pointer; font-weight:600;
   }
-  .attach-panel .btn.secondary{ background:#0f141b; color:#e7edf4; }
-  .attach-panel select, .attach-panel input[type="password"]{
-    background:#0f141b; color:#e7edf4; border:1px solid var(--border); border-radius:10px; padding:6px 8px;
-  }
-  .badge{ display:inline-block; padding:2px 8px; border-radius:999px; font-size:.78rem; }
-  .badge.lock{ background:#1b2a3e; color:#a5c4ff; }
+  .btn.secondary{ background:#0f151e; color:#e7edf4 }
+  .ghost{ background:transparent; border:0; color:#a9bdd2; cursor:pointer; }
+  .ghost:hover{ color:#d5e6ff; text-decoration:underline }
 </style>
 </head>
 <body>
@@ -105,20 +118,42 @@
   </div>
 </div>
 
-<!-- Attachment Options Panel -->
-<div id="attachPanel" class="attach-panel" aria-live="polite">
-  <div class="group">
-    <button id="optTTL"   class="btn secondary">Recall after…</button>
-    <select id="ttlDays"></select><span>days</span>
-    <select id="ttlHours"></select><span>hours</span>
-    <select id="ttlMinutes"></select><span>minutes</span>
-    <select id="ttlSeconds"></select><span>seconds</span>
+<!-- ===== Attachment Sheet ===== -->
+<div id="overlay" class="overlay"></div>
+<div id="sheet" class="sheet" role="dialog" aria-modal="true" aria-labelledby="attTitle">
+  <h3 id="attTitle">Attachment Options</h3>
+
+  <!-- Step 1: choices -->
+  <div id="choices" class="choices">
+    <div id="chooseTTL" class="choice">
+      <div class="title">Recall After</div>
+      <div class="desc">Auto-recall the file after a set time. Both sides see a red countdown.</div>
+    </div>
+    <div id="choosePW" class="choice">
+      <div class="title">Recall with Password</div>
+      <div class="desc">Receiver must enter a password to view. One wrong attempt will recall the file.</div>
+    </div>
   </div>
-  <div class="group">
-    <button id="optPW" class="btn secondary">Recall with password</button>
-    <input id="pwInput" type="password" placeholder="Enter password" minlength="1" />
+
+  <div class="divider"></div>
+
+  <!-- Step 2A: TTL panel -->
+  <div id="panelTTL" class="panel" aria-hidden="true">
+    <span style="min-width:110px;color:#cfe1f7">Recall after</span>
+    <select id="ttlDays" class="select"></select><span>days</span>
+    <select id="ttlHours" class="select"></select><span>hours</span>
+    <select id="ttlMinutes" class="select"></select><span>minutes</span>
+    <select id="ttlSeconds" class="select"></select><span>seconds</span>
   </div>
-  <div class="group" style="margin-left:auto">
+
+  <!-- Step 2B: Password panel -->
+  <div id="panelPW" class="panel" aria-hidden="true">
+    <span style="min-width:110px;color:#cfe1f7">Enter password</span>
+    <input id="pwInput" class="input" type="password" placeholder="Enter password" minlength="1" />
+  </div>
+
+  <div class="actions">
+    <button id="backChoice" class="ghost" style="margin-right:auto; display:none">← Back</button>
     <button id="sendFiles" class="btn">Send files</button>
     <button id="cancelAttach" class="btn secondary">Cancel</button>
   </div>
@@ -133,42 +168,24 @@ const sendBtn = document.getElementById('send');
 const attachBtn = document.getElementById('attach');
 const fileInput = document.getElementById('fileInput');
 
-// Panel & controls
-const panel = document.getElementById('attachPanel');
-const optTTL = document.getElementById('optTTL');
-const optPW  = document.getElementById('optPW');
-const selD = document.getElementById('ttlDays');
-const selH = document.getElementById('ttlHours');
-const selM = document.getElementById('ttlMinutes');
-const selS = document.getElementById('ttlSeconds');
-const pwInput = document.getElementById('pwInput');
-const sendFilesBtn = document.getElementById('sendFiles');
-const cancelAttach = document.getElementById('cancelAttach');
-
 let myName = '', myRoom = roomFromPath();
-let pendingFiles = null; // File[] before we choose options
-let useTTL = false, usePW = false;
 
+// ===== Helpers =====
 function roomFromPath(){ const p = location.pathname.replace(/^\/+|\/+$/g,''); return p || 'chat'; }
 function wsURL(){ const proto = location.protocol === 'https:' ? 'wss://' : 'ws://'; return proto + location.host + location.pathname; }
 function humanSize(b){ const u=['B','KB','MB','GB']; let v=b,i=0; while(v>=1024&&i<u.length-1){v/=1024;i++;} return v.toFixed(v>=10||i===0?0:1)+' '+u[i]; }
 function esc(s){ return String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
-
 function bubbleMenu(id, mine){ return `
   <button class="kebab" data-action="open-menu" data-id="${id}" ${mine?'':'style="display:none"'} title="More">⋯</button>
   <div class="menu" data-menu-for="${id}">
     <button data-action="recall" data-id="${id}">Recall</button>
   </div>`; }
-
 function appendSystemLine(rowEl, text){
-  const bubble = rowEl.querySelector('.bubble');
-  if (!bubble) return;
-  const sys = document.createElement('div');
-  sys.className = 'sys';
-  sys.textContent = text;
-  bubble.appendChild(sys);
+  const bubble = rowEl.querySelector('.bubble'); if (!bubble) return;
+  const sys = document.createElement('div'); sys.className = 'sys'; sys.textContent = text; bubble.appendChild(sys);
 }
 
+// ===== Rendering =====
 function writeText(kind, id, text, ts=Date.now()){
   const row = document.createElement('div');
   row.className = 'row ' + (kind==='me' ? 'me' : '');
@@ -179,36 +196,20 @@ function writeText(kind, id, text, ts=Date.now()){
       <div>${esc(text)}</div>
       <div class="meta">${new Date(ts).toLocaleString()}</div>
     </div>`;
-  log.appendChild(row);
-  log.scrollTop = log.scrollHeight;
+  log.appendChild(row); log.scrollTop = log.scrollHeight;
 }
-
-function fileBadge(protectedFile){
-  return protectedFile ? ` <span class="badge lock">🔒 password</span>` : '';
-}
-
+function fileBadge(protectedFile){ return protectedFile ? ` <span class="badge">🔒 Password</span>` : ''; }
 function writeFile(kind, id, file, ts=Date.now(), expiresAt=null){
-  const row = document.createElement('div');
-  row.className = 'row ' + (kind==='me' ? 'me' : '');
-  row.dataset.id = id;
-
+  const row = document.createElement('div'); row.className = 'row ' + (kind==='me' ? 'me' : ''); row.dataset.id = id;
   let content;
   if (file.protected && !file.url) {
-    // locked placeholder (receiver until unlocked; sender until owner url arrives)
-    content = `
-      <div class="filecard">
-        <span class="filename">${esc(file.name)}</span>
-        <span style="color:#9fb0c2">(${humanSize(file.size)})</span>
-        ${fileBadge(true)}
-      </div>
-    `;
+    content = `<div class="filecard"><span class="filename">${esc(file.name)}</span><span style="color:#9fb0c2">(${humanSize(file.size)})</span>${fileBadge(true)}</div>`;
   } else {
     const isImg = /^image\//.test(file.mime || '');
     content = isImg
       ? `<img class="filethumb" src="${file.url}" alt="${esc(file.name)}" />`
       : `<a class="filename" href="${file.url}" download>${esc(file.name)}</a> <span style="color:#9fb0c2">(${humanSize(file.size)})</span>`;
   }
-
   row.innerHTML = `
     <div class="bubble">
       ${bubbleMenu(id, kind==='me')}
@@ -218,270 +219,188 @@ function writeFile(kind, id, file, ts=Date.now(), expiresAt=null){
     </div>`;
   log.appendChild(row);
 
-  // If I'm the receiver and this is protected, show unlock inline
+  // Inline unlock for receiver if protected
   if (file.protected && !file.url && kind !== 'me') {
     const bubble = row.querySelector('.bubble');
     const wrap = document.createElement('div');
-    wrap.style.marginTop = '8px';
+    wrap.style.marginTop = '10px';
     wrap.innerHTML = `
-      <input type="password" class="pwfield" placeholder="Enter password to unlock" style="background:#0f141b;color:#e7edf4;border:1px solid var(--border);border-radius:10px;padding:8px;width:220px">
-      <button class="btnUnlock" data-id="${id}" style="margin-left:8px;border:1px solid var(--border);background:#1b87f3;color:#fff;padding:8px 12px;border-radius:10px;cursor:pointer">Unlock</button>
+      <input type="password" class="pwfield" placeholder="Enter password to unlock" style="background:#101725;color:#e7edf4;border:1px solid var(--border);border-radius:10px;padding:10px;width:240px">
+      <button class="btnUnlock" data-id="${id}" style="margin-left:8px;border:1px solid var(--border);background:#1b87f3;color:#fff;padding:10px 12px;border-radius:10px;cursor:pointer">Unlock</button>
     `;
     bubble.appendChild(wrap);
   }
   log.scrollTop = log.scrollHeight;
 }
-
-// Receiver view on recall: tombstone + system line
 function recallForReceiver(id, sysText){
-  const row = log.querySelector(`.row[data-id="${CSS.escape(id)}"]`);
-  if (!row) return;
-  const bubble = row.querySelector('.bubble');
-  if (bubble){
-    bubble.innerHTML = `<div class="tomb">This item was recalled by the sender.</div>`;
-  }
+  const row = log.querySelector(`.row[data-id="${CSS.escape(id)}"]`); if (!row) return;
+  const bubble = row.querySelector('.bubble'); if (bubble) bubble.innerHTML = `<div class="tomb">This item was recalled by the sender.</div>`;
   appendSystemLine(row, sysText || 'This item was recalled by the sender.');
   setTimeout(()=> row.scrollIntoView({behavior:'smooth', block:'nearest'}), 0);
 }
-
-// Sender view on recall: keep content, add system line; remove countdown; update URL if provided
 function markOwnerRecalled(id, sysText, newUrl){
-  const row = log.querySelector(`.row[data-id="${CSS.escape(id)}"]`);
-  if (!row) return;
+  const row = log.querySelector(`.row[data-id="${CSS.escape(id)}"]`); if (!row) return;
   if (newUrl) {
-    const a = row.querySelector('.filename');
-    const img = row.querySelector('.filethumb');
-    if (a) a.href = newUrl;
-    if (img) img.src = newUrl;
+    const a = row.querySelector('.filename'); const img = row.querySelector('.filethumb');
+    if (a) a.href = newUrl; if (img) img.src = newUrl;
   }
-  const exp = row.querySelector('.expiry'); if (exp) exp.remove();
+  row.querySelector('.expiry')?.remove();
   appendSystemLine(row, sysText || 'You recalled this. The other person can no longer see it.');
   setTimeout(()=> row.scrollIntoView({behavior:'smooth', block:'nearest'}), 0);
 }
-
-// Owner augmentation: when server sends ownerUrl for protected files
 function setOwnerUrl(id, ownerUrl){
-  const row = log.querySelector(`.row[data-id="${CSS.escape(id)}"]`);
-  if (!row) return;
-  const bubble = row.querySelector('.bubble');
-  // Replace placeholder content with link if available
-  const nameEl = bubble.querySelector('.filename');
+  const row = log.querySelector(`.row[data-id="${CSS.escape(id)}"]`); if (!row) return;
+  const bubble = row.querySelector('.bubble'); const nameEl = bubble.querySelector('.filename');
   if (nameEl && ownerUrl) {
     if (nameEl.tagName !== 'A') {
-      const name = nameEl.textContent || 'file';
-      const sizeNote = nameEl.nextElementSibling?.outerHTML || '';
+      const name = nameEl.textContent || 'file'; const sizeNote = nameEl.nextElementSibling?.outerHTML || '';
       nameEl.outerHTML = `<a class="filename" href="${ownerUrl}" download>${esc(name)}</a>${sizeNote}`;
-    } else {
-      nameEl.href = ownerUrl;
-    }
+    } else { nameEl.href = ownerUrl; }
   }
 }
 
 // Countdown
-function fmtRemaining(ms){
-  if (ms <= 0) return 'recalling…';
-  const s = Math.floor(ms/1000);
-  const d = Math.floor(s/86400);
-  const h = Math.floor((s%86400)/3600);
-  const m = Math.floor((s%3600)/60);
-  const ss = s%60;
-  const parts = [];
-  if (d) parts.push(d+'d');
-  if (h || d) parts.push(h+'h');
-  if (m || h || d) parts.push(m+'m');
-  parts.push(ss+'s');
-  return '⏱ ' + parts.join(' ');
-}
-function tickCountdowns(){
-  const n = Date.now();
-  document.querySelectorAll('.expiry').forEach(el => {
-    const exp = parseInt(el.getAttribute('data-expires') || '0', 10);
-    el.textContent = fmtRemaining(exp - n);
-  });
-}
-setInterval(tickCountdowns, 1000);
+function fmtRemaining(ms){ if (ms<=0) return 'recalling…'; const s=Math.floor(ms/1000); const d=Math.floor(s/86400); const h=Math.floor((s%86400)/3600); const m=Math.floor((s%3600)/60); const ss=s%60; const parts=[]; if(d)parts.push(d+'d'); if(h||d)parts.push(h+'h'); if(m||h||d)parts.push(m+'m'); parts.push(ss+'s'); return '⏱ '+parts.join(' '); }
+function tickCountdowns(){ const n=Date.now(); document.querySelectorAll('.expiry').forEach(el=>{ const exp=parseInt(el.getAttribute('data-expires')||'0',10); el.textContent = fmtRemaining(exp-n); }); }
+setInterval(tickCountdowns,1000);
 
-// ---- WebSocket ----
+// ===== WebSocket =====
 const ws = new WebSocket(wsURL());
 ws.onopen = () => { title.textContent = 'Room: ' + myRoom; };
 ws.onmessage = (ev) => {
   const d = JSON.parse(ev.data);
-  if (d.type === 'room_full') {
-    writeText('them', 'Room is full. Create a new path, e.g., /chat-1234');
-    msgInput.disabled = sendBtn.disabled = attachBtn.disabled = fileInput.disabled = true;
-    presence.textContent = 'Room full'; return;
-  }
-  if (d.type === 'welcome') {
-    myName = d.yourName;
-    presence.textContent = 'In room: ' + (d.users || []).join(', ');
-    title.textContent = 'Room: ' + d.room + ' • You: ' + myName; return;
-  }
-  if (d.type === 'presence') {
-    presence.textContent = 'In room: ' + (d.users || []).join(', '); return;
-  }
-  if (d.type === 'chat') {
-    const who = d.from === myName ? 'me' : 'them';
-    writeText(who, d.id, d.text, d.ts); return;
-  }
-  if (d.type === 'file') {
-    const who = d.from === myName ? 'me' : 'them';
-    writeFile(who, d.id, d.file, d.ts, d.expiresAt || null); return;
-  }
-  if (d.type === 'file_owner') {
-    if (d.ownerUrl) setOwnerUrl(d.id, d.ownerUrl); return;
-  }
+  if (d.type === 'room_full') { writeText('them','_','Room is full. Create a new path, e.g., /chat-1234'); msgInput.disabled=sendBtn.disabled=attachBtn.disabled=fileInput.disabled=true; presence.textContent='Room full'; return; }
+  if (d.type === 'welcome') { myName = d.yourName; presence.textContent = 'In room: ' + (d.users||[]).join(', '); title.textContent = 'Room: ' + d.room + ' • You: ' + myName; return; }
+  if (d.type === 'presence') { presence.textContent = 'In room: ' + (d.users||[]).join(', '); return; }
+  if (d.type === 'chat') { const who = d.from===myName?'me':'them'; writeText(who, d.id, d.text, d.ts); return; }
+  if (d.type === 'file') { const who = d.from===myName?'me':'them'; writeFile(who, d.id, d.file, d.ts, d.expiresAt||null); return; }
+  if (d.type === 'file_owner') { if (d.ownerUrl) setOwnerUrl(d.id, d.ownerUrl); return; }
   if (d.type === 'file_unlocked') {
-    // receiver gets usable url after correct password
-    const row = log.querySelector(`.row[data-id="${CSS.escape(d.id)}"]`);
-    if (!row) return;
-    const bubble = row.querySelector('.bubble');
-    // Replace placeholder with link/img
-    const isImg = false; // we don't know; just put a link
-    const nameEl = bubble.querySelector('.filename');
+    const row = log.querySelector(`.row[data-id="${CSS.escape(d.id)}"]`); if (!row) return;
+    const bubble = row.querySelector('.bubble'); const nameEl=bubble.querySelector('.filename');
     if (nameEl) {
       if (nameEl.tagName !== 'A') {
-        const name = nameEl.textContent || 'file';
-        const sizeNote = nameEl.nextElementSibling?.outerHTML || '';
+        const name=nameEl.textContent||'file'; const sizeNote=nameEl.nextElementSibling?.outerHTML || '';
         nameEl.outerHTML = `<a class="filename" href="${d.url}" download>${esc(name)}</a>${sizeNote}`;
-      } else {
-        nameEl.href = d.url;
-      }
+      } else nameEl.href = d.url;
     }
-    // Remove unlock controls
-    bubble.querySelector('.pwfield')?.remove();
-    bubble.querySelector('.btnUnlock')?.remove();
+    bubble.querySelector('.pwfield')?.remove(); bubble.querySelector('.btnUnlock')?.remove();
     return;
   }
   if (d.type === 'recalled') { recallForReceiver(d.id, d.sys); return; }
   if (d.type === 'recalled_owner') { markOwnerRecalled(d.id, d.sys, d.newUrl); return; }
-  if (d.type === 'error') {
-    writeText('them', '⚠️ ' + (d.message || 'Error')); return;
-  }
+  if (d.type === 'error') { writeText('them','_','⚠️ '+(d.message||'Error')); return; }
 };
 ws.onclose = () => { presence.textContent = 'Disconnected'; };
 
-// ---- Send text ----
-function send(){
-  const text = msgInput.value.trim();
-  if (!text) return;
-  ws.send(JSON.stringify({ type:'chat', text }));
-  msgInput.value = '';
-}
-
-// ---- Upload with options ----
-async function uploadFiles(files, ttlSeconds, password){
-  if (!files || files.length === 0) return;
-  const form = new FormData();
-  for (const f of files) form.append('file', f);
-  if (ttlSeconds && ttlSeconds > 0) form.append('ttl', String(ttlSeconds));
-  if (password && password.length > 0) form.append('pw', password);
-  try{
-    const res = await fetch(`/upload/${encodeURIComponent(myRoom)}`, { method:'POST', body: form });
-    if (!res.ok) {
-      const json = await res.json().catch(()=>({}));
-      throw new Error(json.error || ('Upload failed: ' + res.status));
-    }
-  }catch(err){
-    writeText('them', '⚠️ ' + (err?.message || 'Upload failed'));
-  }finally{ fileInput.value = ''; }
-}
-
-// ---- Recall ----
+// ===== Send / Recall =====
+function send(){ const text = msgInput.value.trim(); if(!text) return; ws.send(JSON.stringify({type:'chat', text})); msgInput.value=''; }
 function recall(id){ ws.send(JSON.stringify({ type:'recall', id })); }
-
-// ---- UI wiring ----
 sendBtn.onclick = send;
-msgInput.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); send(); }});
-attachBtn.addEventListener('click', () => fileInput.click());
+msgInput.addEventListener('keydown', (e)=>{ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); send(); }});
 
-// Build selects
-function fillSelect(sel, max){
-  sel.innerHTML = '';
-  for (let i=0;i<=max;i++){
-    const opt = document.createElement('option');
-    opt.value = i; opt.textContent = String(i).padStart(2,'0');
-    sel.appendChild(opt);
-  }
-}
+// ===== Attachment Sheet Logic =====
+const overlay = document.getElementById('overlay');
+const sheet   = document.getElementById('sheet');
+const choices = document.getElementById('choices');
+const panelTTL= document.getElementById('panelTTL');
+const panelPW = document.getElementById('panelPW');
+const backBtn = document.getElementById('backChoice');
+const sendFilesBtn = document.getElementById('sendFiles');
+const cancelAttach = document.getElementById('cancelAttach');
+const chooseTTL = document.getElementById('chooseTTL');
+const choosePW  = document.getElementById('choosePW');
+const selD = document.getElementById('ttlDays');
+const selH = document.getElementById('ttlHours');
+const selM = document.getElementById('ttlMinutes');
+const selS = document.getElementById('ttlSeconds');
+const pwInput = document.getElementById('pwInput');
+
+let pendingFiles = null;
+let mode = null; // 'ttl' | 'pw'
+
+// build selects
+function fillSelect(sel, max){ sel.innerHTML=''; for(let i=0;i<=max;i++){ const o=document.createElement('option'); o.value=i; o.textContent=String(i).padStart(2,'0'); sel.appendChild(o);} }
 fillSelect(selD, 30); fillSelect(selH, 23); fillSelect(selM, 59); fillSelect(selS, 59);
 
-// Panel helpers
-function openPanel(){
-  panel.classList.add('open');
-  useTTL = false; usePW = false;
-  optTTL.classList.add('secondary'); optPW.classList.add('secondary');
-  selD.disabled = selH.disabled = selM.disabled = selS.disabled = true;
-  pwInput.disabled = true; pwInput.value = '';
-  selD.value = '0'; selH.value = '0'; selM.value = '0'; selS.value = '0';
+function openSheet(){ overlay.classList.add('open'); sheet.classList.add('open'); showChoices(); }
+function closeSheet(){ overlay.classList.remove('open'); sheet.classList.remove('open'); pendingFiles=null; mode=null; }
+function showChoices(){
+  choices.style.display='grid';
+  panelTTL.classList.remove('active'); panelPW.classList.remove('active');
+  panelTTL.setAttribute('aria-hidden','true'); panelPW.setAttribute('aria-hidden','true');
+  backBtn.style.display='none';
 }
-function closePanel(){ panel.classList.remove('open'); pendingFiles = null; }
+function showTTL(){
+  choices.style.display='none'; panelTTL.classList.add('active'); panelPW.classList.remove('active');
+  panelTTL.setAttribute('aria-hidden','false'); panelPW.setAttribute('aria-hidden','true'); backBtn.style.display='inline';
+  selD.value='0'; selH.value='0'; selM.value='0'; selS.value='0';
+  mode='ttl';
+}
+function showPW(){
+  choices.style.display='none'; panelPW.classList.add('active'); panelTTL.classList.remove('active');
+  panelPW.setAttribute('aria-hidden','false'); panelTTL.setAttribute('aria-hidden','true'); backBtn.style.display='inline';
+  pwInput.value=''; pwInput.focus(); mode='pw';
+}
 
-optTTL.addEventListener('click', () => {
-  useTTL = true; usePW = false;
-  optTTL.classList.remove('secondary'); optPW.classList.add('secondary');
-  selD.disabled = selH.disabled = selM.disabled = selS.disabled = false;
-  pwInput.disabled = true;
-});
-
-optPW.addEventListener('click', () => {
-  usePW = true; useTTL = false;
-  optPW.classList.remove('secondary'); optTTL.classList.add('secondary');
-  pwInput.disabled = false; pwInput.focus();
-  selD.disabled = selH.disabled = selM.disabled = selS.disabled = true;
-});
-
-fileInput.addEventListener('change', (e) => {
-  const files = Array.from(e.target.files || []);
+attachBtn.addEventListener('click', ()=> fileInput.click());
+fileInput.addEventListener('change', (e)=>{
+  const files = Array.from(e.target.files||[]);
   if (!files.length) return;
-  pendingFiles = files;
-  openPanel();
+  pendingFiles = files; openSheet();
 });
+overlay.addEventListener('click', closeSheet);
+cancelAttach.addEventListener('click', closeSheet);
+backBtn.addEventListener('click', showChoices);
+chooseTTL.addEventListener('click', showTTL);
+choosePW.addEventListener('click', showPW);
 
-sendFilesBtn.addEventListener('click', async () => {
-  if (!pendingFiles) return closePanel();
-  let ttlSeconds = 0, password = '';
-  if (useTTL){
-    const d = parseInt(selD.value,10)||0;
-    const h = parseInt(selH.value,10)||0;
-    const m = parseInt(selM.value,10)||0;
-    const s = parseInt(selS.value,10)||0;
-    ttlSeconds = (d*86400) + (h*3600) + (m*60) + s;
-  }
-  if (usePW){
+async function uploadFiles(files, ttlSeconds, password){
+  const form = new FormData(); for(const f of files) form.append('file', f);
+  if (ttlSeconds && ttlSeconds>0) form.append('ttl', String(ttlSeconds));
+  if (password && password.length>0) form.append('pw', password);
+  try{
+    const res = await fetch(`/upload/${encodeURIComponent(myRoom)}`, { method:'POST', body: form });
+    if (!res.ok) { const j = await res.json().catch(()=>({})); throw new Error(j.error || ('Upload failed: '+res.status)); }
+  }catch(err){ writeText('them','_','⚠️ '+(err?.message||'Upload failed')); }
+  finally{ fileInput.value=''; }
+}
+
+sendFilesBtn.addEventListener('click', async ()=>{
+  if (!pendingFiles) return closeSheet();
+  let ttlSeconds=0, password='';
+  if (mode==='ttl'){
+    const d=+selD.value||0, h=+selH.value||0, m=+selM.value||0, s=+selS.value||0;
+    ttlSeconds = d*86400 + h*3600 + m*60 + s;
+  } else if (mode==='pw'){
     password = pwInput.value.trim();
     if (!password){ alert('Please enter a password.'); return; }
+  } else {
+    // if they never chose, default to immediate send without options
   }
   await uploadFiles(pendingFiles, ttlSeconds, password);
-  closePanel();
+  closeSheet();
 });
 
-cancelAttach.addEventListener('click', () => closePanel());
-
-// Unlock action (receiver)
+// ===== Unlock (receiver) =====
 log.addEventListener('click', async (e) => {
-  const btn = e.target.closest('.btnUnlock');
-  if (!btn) return;
+  const btn = e.target.closest('.btnUnlock'); if (!btn) return;
   const id = btn.dataset.id;
   const row = log.querySelector(`.row[data-id="${CSS.escape(id)}"]`);
-  const pwf = row?.querySelector('.pwfield');
-  const pass = pwf?.value || '';
+  const pwf = row?.querySelector('.pwfield'); const pass = pwf?.value || '';
   try{
     const res = await fetch(`/unlock/${encodeURIComponent(id)}`, {
       method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ password: pass })
     });
     if (!res.ok) {
       const j = await res.json().catch(()=>({}));
-      throw new Error(j.error || 'Unlock failed');
+      // server will also recall on wrong pw; optional toast here
+      console.warn(j.error || 'Unlock failed');
     }
-  }catch(err){
-    // Server will either unlock (and send event) or recall (and send recalled)
-    // We can show a temporary toast if needed:
-    // writeText('them', '⚠️ ' + (err?.message || 'Unlock failed'));
-    console.warn(err);
-  }
+  }catch(err){ console.warn(err); }
 });
 
-// Menus
+// ===== Menus (recall) =====
 log.addEventListener('click', (e) => {
   const btn = e.target.closest('button'); if (!btn) return;
   const action = btn.dataset.action; const id = btn.dataset.id;
@@ -491,15 +410,16 @@ log.addEventListener('click', (e) => {
     if (menu) menu.classList.add('open');
   }
   if (action === 'recall') {
-    const menu = log.querySelector(`.menu[data-menu-for="${CSS.escape(id)}"]`);
-    if (menu) menu.classList.remove('open');
+    const menu = log.querySelector(`.menu[data-menu-for="${CSS.escape(id)}"]`); if (menu) menu.classList.remove('open');
     recall(id);
   }
 });
 document.addEventListener('click', (e) => {
-  const inside = e.target.closest('.menu, .kebab, .attach-panel');
-  if (!inside) document.querySelectorAll('.menu.open').forEach(m => m.classList.remove('open'));
+  const inside = e.target.closest('.menu, .kebab, .sheet'); if (!inside) document.querySelectorAll('.menu.open').forEach(m => m.classList.remove('open'));
 });
+
+// ===== WS Close =====
+function writeInit(){ /* noop */ }
 </script>
 </body>
 </html>
