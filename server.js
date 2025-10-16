@@ -13,11 +13,18 @@ const app = express();
 app.use(cors());
 app.use(express.static(__dirname));
 
-// Serve index.html for any path (room = path)
-app.get('*', (_req, res) => res.sendFile(path.join(__dirname,'index.html')));
+// Serve SPA for any path
+app.get('*', (_req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
+
+// Keep-alive (some proxies idle-out WS)
+setInterval(() => {
+  wss.clients.forEach(ws => {
+    try { ws.ping(); } catch {}
+  });
+}, 25000);
 
 // In-memory rooms
 const rooms = new Map(); // id -> Set(ws)
@@ -57,12 +64,11 @@ wss.on('connection', (ws, req) => {
     const info = meta.get(ws); if (!info) return;
     const {room, username} = info;
 
-    // Relay supported message types
     if (data.type === 'chat') {
       broadcast(room, {type:'chat', from:username, text:String(data.text||'').slice(0,4000), ts:Date.now()}, null);
-    } else if (data.type === 'file_meta' || data.type === 'file_chunk' || data.type === 'file_done' || data.type === 'file_abort') {
-      data.from = username; // tag sender
-      broadcast(room, data, ws); // send to the other peer only
+    } else if (['file_meta','file_chunk','file_done','file_abort'].includes(data.type)) {
+      data.from = username;
+      broadcast(room, data, ws);
     }
   });
 
