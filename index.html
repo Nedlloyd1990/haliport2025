@@ -65,8 +65,7 @@ function write(kind, html){ const row=document.createElement('div'); row.classNa
 
 // Fixed WS path '/ws' (avoids path conflicts)
 function wsURL(){
-  const proto = location.protocol === 'https:' ? 'wss://' : 'ws://';
-  return proto + location.host + '/ws';
+  return 'wss://haliport2025.onrender.com/ws';
 }
 
 let myName = '', myRoom = roomFromPath(), ws;
