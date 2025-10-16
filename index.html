@@ -26,6 +26,7 @@
   .attach{background:#243041;border:1px solid var(--border);color:#e7edf4;padding:12px 14px;border-radius:12px;cursor:pointer}
   .tip{color:#9fb0c2;font-size:.9rem;margin:0 18px 8px}
   a.dl{color:#9ad0ff}
+  .err{color:#ff8a8a;margin:8px 18px}
 </style>
 </head>
 <body>
@@ -37,6 +38,7 @@
 
   <div class="scroll" id="log"><div style="color:#9fb0c2">Open this URL on two devices to chat or send files.</div></div>
   <p class="tip">Press <b>Enter</b> to send • <b>Shift+Enter</b> for a new line • Files up to <b>10 MB</b></p>
+  <div id="error" class="err"></div>
 
   <div class="composer">
     <button id="pick" class="attach">📎 Attach</button>
@@ -51,31 +53,57 @@ const MAX_FILE = 10 * 1024 * 1024; // 10 MB
 const log = document.getElementById('log');
 const title = document.getElementById('title');
 const presence = document.getElementById('presence');
+const errorBox = document.getElementById('error');
 const msgInput = document.getElementById('msg');
 const sendBtn = document.getElementById('send');
 const fileBtn = document.getElementById('pick');
 const fileInput = document.getElementById('file');
 
 function roomFromPath(){ const p = location.pathname.replace(/^\\/+|\\/+$/g,''); return p || 'chat'; }
-function wsURL(){ const proto = location.protocol==='https:'?'wss://':'ws://'; return proto + location.host + location.pathname; }
 function escape(s){ return String(s).replace(/[&<>\"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',\"'\":'&#39;'}[c])); }
 function write(kind, html){ const row=document.createElement('div'); row.className='row '+(kind==='me'?'me':''); row.innerHTML=html; log.appendChild(row); log.scrollTop=log.scrollHeight; }
 
-// Connect immediately
-const ws = new WebSocket(wsURL());
-let myName = '', myRoom = roomFromPath();
+// Resilient WebSocket connect: try candidate URLs
+function wsConnect(){
+  const proto = location.protocol==='https:'?'wss://':'ws://';
+  const host = location.host;
+  const path = location.pathname;
+  const candidates = [
+    proto + host + path,       // with path as room
+    proto + host + '/',        // root
+    proto + host               // host only
+  ];
+  let i = 0;
+  return new Promise((resolve, reject)=>{
+    const tryNext = () => {
+      if (i >= candidates.length) return reject(new Error('All WS URLs failed'));
+      const url = candidates[i++];
+      const ws = new WebSocket(url);
+      ws.onopen = () => resolve(ws);
+      ws.onerror = (e) => { errorBox.textContent = 'WebSocket failed: ' + url; tryNext(); };
+    };
+    tryNext();
+  });
+}
 
-ws.onopen = () => { title.textContent = 'Room: ' + myRoom; };
-ws.onmessage = (ev) => {
-  const data = JSON.parse(ev.data);
-  if (data.type === 'room_full'){ write('them','<div class="card">Room is full. Change the path (e.g., /chat-1234)</div>'); disable(); return; }
-  if (data.type === 'welcome'){ myName=data.yourName; presence.textContent='In room: '+(data.users||[]).join(', '); title.textContent='Room: '+data.room+' • You: '+myName; return; }
-  if (data.type === 'presence'){ presence.textContent='In room: '+(data.users||[]).join(', '); return; }
-  if (data.type === 'chat'){ const who=data.from===myName?'me':'them'; write(who, `<div class="bubble"><div>${escape(data.text)}</div><div class="meta">${new Date(data.ts).toLocaleString()}</div></div>`); return; }
-  if (data.type === 'file_meta'){ handleIncomingFileMeta(data); return; }
-  if (data.type === 'file_chunk'){ handleIncomingFileChunk(data); return; }
-  if (data.type === 'file_done'){ handleIncomingFileDone(data); return; }
-};
+let myName = '', myRoom = roomFromPath(), ws;
+wsConnect().then(sock => {
+  ws = sock;
+  title.textContent = 'Room: ' + myRoom;
+  ws.onmessage = (ev) => {
+    const data = JSON.parse(ev.data);
+    if (data.type === 'room_full'){ write('them','<div class="card">Room is full. Change the path (e.g., /chat-1234)</div>'); disable(); return; }
+    if (data.type === 'welcome'){ myName=data.yourName; presence.textContent='In room: '+(data.users||[]).join(', '); title.textContent='Room: '+data.room+' • You: '+myName; return; }
+    if (data.type === 'presence'){ presence.textContent='In room: '+(data.users||[]).join(', '); return; }
+    if (data.type === 'chat'){ const who=data.from===myName?'me':'them'; write(who, `<div class="bubble"><div>${escape(data.text)}</div><div class="meta">${new Date(data.ts).toLocaleString()}</div></div>`); return; }
+    if (data.type === 'file_meta'){ handleIncomingFileMeta(data); return; }
+    if (data.type === 'file_chunk'){ handleIncomingFileChunk(data); return; }
+    if (data.type === 'file_done'){ handleIncomingFileDone(data); return; }
+  };
+  ws.onclose = () => { presence.textContent = 'Disconnected'; };
+}).catch(err => {
+  errorBox.textContent = 'Could not connect WebSocket. Make sure WebSockets are enabled on your host. ('+err.message+')';
+});
 
 function disable(){ msgInput.disabled=true; sendBtn.disabled=true; fileBtn.disabled=true; }
 
@@ -83,7 +111,7 @@ function disable(){ msgInput.disabled=true; sendBtn.disabled=true; fileBtn.disab
 function send() {
   const text = msgInput.value.trim();
   if (!text) return;
-  ws.send(JSON.stringify({ type:'chat', text }));
+  ws && ws.send(JSON.stringify({ type:'chat', text }));
   msgInput.value = '';
 }
 sendBtn.onclick = send;
@@ -102,23 +130,23 @@ fileInput.onchange = async () => {
   card.innerHTML = `<div class="card"><div class="name">📎 ${escape(f.name)} (${Math.round(f.size/1024)} KB)</div><div class="progress"><div class="bar" id="bar-${fid}"></div></div></div>`;
   log.appendChild(card); log.scrollTop=log.scrollHeight;
 
-  ws.send(JSON.stringify({ type:'file_meta', id:fid, name:f.name, size:f.size, mime:f.type||'application/octet-stream' }));
+  ws && ws.send(JSON.stringify({ type:'file_meta', id:fid, name:f.name, size:f.size, mime:f.type||'application/octet-stream' }));
 
   const chunkSize = 64 * 1024;
   let offset = 0;
   const reader = new FileReader();
   reader.onload = () => {
     const base64 = btoa(String.fromCharCode(...new Uint8Array(reader.result)));
-    ws.send(JSON.stringify({ type:'file_chunk', id:fid, data: base64 }));
+    ws && ws.send(JSON.stringify({ type:'file_chunk', id:fid, data: base64 }));
     offset += reader.result.byteLength;
     const bar = document.getElementById('bar-'+fid);
     if (bar) bar.style.width = Math.round((offset / f.size) * 100) + '%';
     pump();
   };
-  reader.onerror = () => { ws.send(JSON.stringify({type:'file_abort', id:fid })); };
+  reader.onerror = () => { ws && ws.send(JSON.stringify({type:'file_abort', id:fid })); };
 
   function pump(){
-    if (offset >= f.size){ ws.send(JSON.stringify({ type:'file_done', id:fid })); fileInput.value=''; return; }
+    if (offset >= f.size){ ws && ws.send(JSON.stringify({ type:'file_done', id:fid })); fileInput.value=''; return; }
     const slice = f.slice(offset, offset+chunkSize);
     reader.readAsArrayBuffer(slice);
   }
@@ -126,7 +154,7 @@ fileInput.onchange = async () => {
 };
 
 // Receiving file
-const incoming = new Map(); // id -> {name,mime,parts:[],size,received}
+const incoming = new Map();
 function handleIncomingFileMeta(d){
   incoming.set(d.id, { name:d.name, mime:d.mime, size:d.size, received:0, parts:[] });
   write('them', `<div class="card" id="rcv-${d.id}"><div class="name">Receiving: 📎 ${escape(d.name)} (${Math.round(d.size/1024)} KB)</div><div class="progress"><div class="bar" id="rcvbar-${d.id}"></div></div></div>`);
