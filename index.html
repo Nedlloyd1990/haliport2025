@@ -61,22 +61,26 @@
   /* countdown */
   .expiry{ color:#ff6b6b; font-size:.85rem; margin-top:4px; }
 
-  /* TTL panel (appears after file choose, before upload) */
-  .ttl-panel{
+  /* Attachment Options panel */
+  .attach-panel{
     position:fixed; left:50%; bottom:88px; transform:translateX(-50%);
     background:#111825; border:1px solid var(--border);
     border-radius:14px; box-shadow:0 18px 50px rgba(0,0,0,.5);
-    padding:14px; display:none; gap:10px; align-items:center; z-index:20;
+    padding:14px; display:none; gap:12px; align-items:center; z-index:20;
+    min-width: 520px;
   }
-  .ttl-panel.open{ display:flex; flex-wrap:wrap; }
-  .ttl-panel label{ font-size:.9rem; color:#d8e1ee; margin-right:8px }
-  .ttl-panel select{ background:#0f141b; color:#e7edf4; border:1px solid var(--border); border-radius:10px; padding:6px 8px; }
-  .ttl-panel .actions{ display:flex; gap:10px; }
-  .ttl-panel .btn{
+  .attach-panel.open{ display:flex; flex-wrap:wrap; }
+  .attach-panel .group{ display:flex; align-items:center; gap:8px; }
+  .attach-panel .btn{
     border:1px solid var(--border); background:#1b87f3; color:#fff;
     padding:8px 12px; border-radius:10px; cursor:pointer;
   }
-  .ttl-panel .btn.secondary{ background:#0f141b; color:#e7edf4; }
+  .attach-panel .btn.secondary{ background:#0f141b; color:#e7edf4; }
+  .attach-panel select, .attach-panel input[type="password"]{
+    background:#0f141b; color:#e7edf4; border:1px solid var(--border); border-radius:10px; padding:6px 8px;
+  }
+  .badge{ display:inline-block; padding:2px 8px; border-radius:999px; font-size:.78rem; }
+  .badge.lock{ background:#1b2a3e; color:#a5c4ff; }
 </style>
 </head>
 <body>
@@ -101,16 +105,22 @@
   </div>
 </div>
 
-<!-- Auto-recall TTL panel -->
-<div id="ttlPanel" class="ttl-panel" aria-live="polite">
-  <label>Recall after:</label>
-  <select id="ttlDays"></select><span>days</span>
-  <select id="ttlHours"></select><span>hours</span>
-  <select id="ttlMinutes"></select><span>minutes</span>
-  <select id="ttlSeconds"></select><span>seconds</span>
-  <div class="actions">
-    <button id="ttlSend" class="btn">Send files</button>
-    <button id="ttlCancel" class="btn secondary">Cancel</button>
+<!-- Attachment Options Panel -->
+<div id="attachPanel" class="attach-panel" aria-live="polite">
+  <div class="group">
+    <button id="optTTL"   class="btn secondary">Recall after…</button>
+    <select id="ttlDays"></select><span>days</span>
+    <select id="ttlHours"></select><span>hours</span>
+    <select id="ttlMinutes"></select><span>minutes</span>
+    <select id="ttlSeconds"></select><span>seconds</span>
+  </div>
+  <div class="group">
+    <button id="optPW" class="btn secondary">Recall with password</button>
+    <input id="pwInput" type="password" placeholder="Enter password" minlength="1" />
+  </div>
+  <div class="group" style="margin-left:auto">
+    <button id="sendFiles" class="btn">Send files</button>
+    <button id="cancelAttach" class="btn secondary">Cancel</button>
   </div>
 </div>
 
@@ -123,16 +133,21 @@ const sendBtn = document.getElementById('send');
 const attachBtn = document.getElementById('attach');
 const fileInput = document.getElementById('fileInput');
 
-const ttlPanel = document.getElementById('ttlPanel');
+// Panel & controls
+const panel = document.getElementById('attachPanel');
+const optTTL = document.getElementById('optTTL');
+const optPW  = document.getElementById('optPW');
 const selD = document.getElementById('ttlDays');
 const selH = document.getElementById('ttlHours');
 const selM = document.getElementById('ttlMinutes');
 const selS = document.getElementById('ttlSeconds');
-const ttlSend = document.getElementById('ttlSend');
-const ttlCancel = document.getElementById('ttlCancel');
+const pwInput = document.getElementById('pwInput');
+const sendFilesBtn = document.getElementById('sendFiles');
+const cancelAttach = document.getElementById('cancelAttach');
 
 let myName = '', myRoom = roomFromPath();
-let pendingFiles = null; // File[] to send after TTL selection
+let pendingFiles = null; // File[] before we choose options
+let useTTL = false, usePW = false;
 
 function roomFromPath(){ const p = location.pathname.replace(/^\/+|\/+$/g,''); return p || 'chat'; }
 function wsURL(){ const proto = location.protocol === 'https:' ? 'wss://' : 'ws://'; return proto + location.host + location.pathname; }
@@ -145,7 +160,6 @@ function bubbleMenu(id, mine){ return `
     <button data-action="recall" data-id="${id}">Recall</button>
   </div>`; }
 
-// System note INSIDE the bubble
 function appendSystemLine(rowEl, text){
   const bubble = rowEl.querySelector('.bubble');
   if (!bubble) return;
@@ -169,22 +183,52 @@ function writeText(kind, id, text, ts=Date.now()){
   log.scrollTop = log.scrollHeight;
 }
 
+function fileBadge(protectedFile){
+  return protectedFile ? ` <span class="badge lock">🔒 password</span>` : '';
+}
+
 function writeFile(kind, id, file, ts=Date.now(), expiresAt=null){
   const row = document.createElement('div');
   row.className = 'row ' + (kind==='me' ? 'me' : '');
   row.dataset.id = id;
-  const isImg = /^image\//.test(file.mime || '');
-  const content = isImg
-    ? `<img class="filethumb" src="${file.url}" alt="${esc(file.name)}" />`
-    : `<a class="filename" href="${file.url}" download>${esc(file.name)}</a> <span style="color:#9fb0c2">(${humanSize(file.size)})</span>`;
+
+  let content;
+  if (file.protected && !file.url) {
+    // locked placeholder (receiver until unlocked; sender until owner url arrives)
+    content = `
+      <div class="filecard">
+        <span class="filename">${esc(file.name)}</span>
+        <span style="color:#9fb0c2">(${humanSize(file.size)})</span>
+        ${fileBadge(true)}
+      </div>
+    `;
+  } else {
+    const isImg = /^image\//.test(file.mime || '');
+    content = isImg
+      ? `<img class="filethumb" src="${file.url}" alt="${esc(file.name)}" />`
+      : `<a class="filename" href="${file.url}" download>${esc(file.name)}</a> <span style="color:#9fb0c2">(${humanSize(file.size)})</span>`;
+  }
+
   row.innerHTML = `
     <div class="bubble">
       ${bubbleMenu(id, kind==='me')}
-      <div class="filecard">${content}</div>
+      ${content}
       ${expiresAt ? `<div class="expiry" data-expires="${expiresAt}" data-id="${id}">⏱ calculating…</div>` : ''}
       <div class="meta">${new Date(ts).toLocaleString()}</div>
     </div>`;
   log.appendChild(row);
+
+  // If I'm the receiver and this is protected, show unlock inline
+  if (file.protected && !file.url && kind !== 'me') {
+    const bubble = row.querySelector('.bubble');
+    const wrap = document.createElement('div');
+    wrap.style.marginTop = '8px';
+    wrap.innerHTML = `
+      <input type="password" class="pwfield" placeholder="Enter password to unlock" style="background:#0f141b;color:#e7edf4;border:1px solid var(--border);border-radius:10px;padding:8px;width:220px">
+      <button class="btnUnlock" data-id="${id}" style="margin-left:8px;border:1px solid var(--border);background:#1b87f3;color:#fff;padding:8px 12px;border-radius:10px;cursor:pointer">Unlock</button>
+    `;
+    bubble.appendChild(wrap);
+  }
   log.scrollTop = log.scrollHeight;
 }
 
@@ -200,28 +244,40 @@ function recallForReceiver(id, sysText){
   setTimeout(()=> row.scrollIntoView({behavior:'smooth', block:'nearest'}), 0);
 }
 
-// Sender view on recall: keep content, add system line; remove countdown; if file, URL may change
+// Sender view on recall: keep content, add system line; remove countdown; update URL if provided
 function markOwnerRecalled(id, sysText, newUrl){
   const row = log.querySelector(`.row[data-id="${CSS.escape(id)}"]`);
   if (!row) return;
-
-  // update link/src if gated URL provided
   if (newUrl) {
     const a = row.querySelector('.filename');
     const img = row.querySelector('.filethumb');
     if (a) a.href = newUrl;
     if (img) img.src = newUrl;
   }
-
-  // remove countdown if present
-  const exp = row.querySelector('.expiry');
-  if (exp) exp.remove();
-
+  const exp = row.querySelector('.expiry'); if (exp) exp.remove();
   appendSystemLine(row, sysText || 'You recalled this. The other person can no longer see it.');
   setTimeout(()=> row.scrollIntoView({behavior:'smooth', block:'nearest'}), 0);
 }
 
-// ---- Countdown updater ----
+// Owner augmentation: when server sends ownerUrl for protected files
+function setOwnerUrl(id, ownerUrl){
+  const row = log.querySelector(`.row[data-id="${CSS.escape(id)}"]`);
+  if (!row) return;
+  const bubble = row.querySelector('.bubble');
+  // Replace placeholder content with link if available
+  const nameEl = bubble.querySelector('.filename');
+  if (nameEl && ownerUrl) {
+    if (nameEl.tagName !== 'A') {
+      const name = nameEl.textContent || 'file';
+      const sizeNote = nameEl.nextElementSibling?.outerHTML || '';
+      nameEl.outerHTML = `<a class="filename" href="${ownerUrl}" download>${esc(name)}</a>${sizeNote}`;
+    } else {
+      nameEl.href = ownerUrl;
+    }
+  }
+}
+
+// Countdown
 function fmtRemaining(ms){
   if (ms <= 0) return 'recalling…';
   const s = Math.floor(ms/1000);
@@ -236,12 +292,11 @@ function fmtRemaining(ms){
   parts.push(ss+'s');
   return '⏱ ' + parts.join(' ');
 }
-
 function tickCountdowns(){
-  const now = Date.now();
+  const n = Date.now();
   document.querySelectorAll('.expiry').forEach(el => {
     const exp = parseInt(el.getAttribute('data-expires') || '0', 10);
-    el.textContent = fmtRemaining(exp - now);
+    el.textContent = fmtRemaining(exp - n);
   });
 }
 setInterval(tickCountdowns, 1000);
@@ -272,12 +327,33 @@ ws.onmessage = (ev) => {
     const who = d.from === myName ? 'me' : 'them';
     writeFile(who, d.id, d.file, d.ts, d.expiresAt || null); return;
   }
-  if (d.type === 'recalled') { // receiver view
-    recallForReceiver(d.id, d.sys); return;
+  if (d.type === 'file_owner') {
+    if (d.ownerUrl) setOwnerUrl(d.id, d.ownerUrl); return;
   }
-  if (d.type === 'recalled_owner') { // sender view
-    markOwnerRecalled(d.id, d.sys, d.newUrl); return;
+  if (d.type === 'file_unlocked') {
+    // receiver gets usable url after correct password
+    const row = log.querySelector(`.row[data-id="${CSS.escape(d.id)}"]`);
+    if (!row) return;
+    const bubble = row.querySelector('.bubble');
+    // Replace placeholder with link/img
+    const isImg = false; // we don't know; just put a link
+    const nameEl = bubble.querySelector('.filename');
+    if (nameEl) {
+      if (nameEl.tagName !== 'A') {
+        const name = nameEl.textContent || 'file';
+        const sizeNote = nameEl.nextElementSibling?.outerHTML || '';
+        nameEl.outerHTML = `<a class="filename" href="${d.url}" download>${esc(name)}</a>${sizeNote}`;
+      } else {
+        nameEl.href = d.url;
+      }
+    }
+    // Remove unlock controls
+    bubble.querySelector('.pwfield')?.remove();
+    bubble.querySelector('.btnUnlock')?.remove();
+    return;
   }
+  if (d.type === 'recalled') { recallForReceiver(d.id, d.sys); return; }
+  if (d.type === 'recalled_owner') { markOwnerRecalled(d.id, d.sys, d.newUrl); return; }
   if (d.type === 'error') {
     writeText('them', '⚠️ ' + (d.message || 'Error')); return;
   }
@@ -292,12 +368,13 @@ function send(){
   msgInput.value = '';
 }
 
-// ---- Upload with optional TTL (seconds) ----
-async function uploadFiles(files, ttlSeconds){
+// ---- Upload with options ----
+async function uploadFiles(files, ttlSeconds, password){
   if (!files || files.length === 0) return;
   const form = new FormData();
   for (const f of files) form.append('file', f);
   if (ttlSeconds && ttlSeconds > 0) form.append('ttl', String(ttlSeconds));
+  if (password && password.length > 0) form.append('pw', password);
   try{
     const res = await fetch(`/upload/${encodeURIComponent(myRoom)}`, { method:'POST', body: form });
     if (!res.ok) {
@@ -306,9 +383,7 @@ async function uploadFiles(files, ttlSeconds){
     }
   }catch(err){
     writeText('them', '⚠️ ' + (err?.message || 'Upload failed'));
-  }finally{
-    fileInput.value = '';
-  }
+  }finally{ fileInput.value = ''; }
 }
 
 // ---- Recall ----
@@ -319,7 +394,7 @@ sendBtn.onclick = send;
 msgInput.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); send(); }});
 attachBtn.addEventListener('click', () => fileInput.click());
 
-// Build TTL dropdowns
+// Build selects
 function fillSelect(sel, max){
   sel.innerHTML = '';
   for (let i=0;i<=max;i++){
@@ -328,37 +403,83 @@ function fillSelect(sel, max){
     sel.appendChild(opt);
   }
 }
-fillSelect(selD, 30); // days (0..30)
-fillSelect(selH, 23); // hours
-fillSelect(selM, 59); // minutes
-fillSelect(selS, 59); // seconds
-function openTTLPanel(){ ttlPanel.classList.add('open'); }
-function closeTTLPanel(){ ttlPanel.classList.remove('open'); pendingFiles = null; }
+fillSelect(selD, 30); fillSelect(selH, 23); fillSelect(selM, 59); fillSelect(selS, 59);
+
+// Panel helpers
+function openPanel(){
+  panel.classList.add('open');
+  useTTL = false; usePW = false;
+  optTTL.classList.add('secondary'); optPW.classList.add('secondary');
+  selD.disabled = selH.disabled = selM.disabled = selS.disabled = true;
+  pwInput.disabled = true; pwInput.value = '';
+  selD.value = '0'; selH.value = '0'; selM.value = '0'; selS.value = '0';
+}
+function closePanel(){ panel.classList.remove('open'); pendingFiles = null; }
+
+optTTL.addEventListener('click', () => {
+  useTTL = true; usePW = false;
+  optTTL.classList.remove('secondary'); optPW.classList.add('secondary');
+  selD.disabled = selH.disabled = selM.disabled = selS.disabled = false;
+  pwInput.disabled = true;
+});
+
+optPW.addEventListener('click', () => {
+  usePW = true; useTTL = false;
+  optPW.classList.remove('secondary'); optTTL.classList.add('secondary');
+  pwInput.disabled = false; pwInput.focus();
+  selD.disabled = selH.disabled = selM.disabled = selS.disabled = true;
+});
 
 fileInput.addEventListener('change', (e) => {
   const files = Array.from(e.target.files || []);
   if (!files.length) return;
   pendingFiles = files;
-  // reset selects
-  selD.value = '0'; selH.value = '0'; selM.value = '0'; selS.value = '0';
-  openTTLPanel();
+  openPanel();
 });
 
-ttlSend.addEventListener('click', async () => {
-  if (!pendingFiles) return closeTTLPanel();
-  const d = parseInt(selD.value,10)||0;
-  const h = parseInt(selH.value,10)||0;
-  const m = parseInt(selM.value,10)||0;
-  const s = parseInt(selS.value,10)||0;
-  const ttlSeconds = (d*86400) + (h*3600) + (m*60) + s;
-  await uploadFiles(pendingFiles, ttlSeconds);
-  closeTTLPanel();
+sendFilesBtn.addEventListener('click', async () => {
+  if (!pendingFiles) return closePanel();
+  let ttlSeconds = 0, password = '';
+  if (useTTL){
+    const d = parseInt(selD.value,10)||0;
+    const h = parseInt(selH.value,10)||0;
+    const m = parseInt(selM.value,10)||0;
+    const s = parseInt(selS.value,10)||0;
+    ttlSeconds = (d*86400) + (h*3600) + (m*60) + s;
+  }
+  if (usePW){
+    password = pwInput.value.trim();
+    if (!password){ alert('Please enter a password.'); return; }
+  }
+  await uploadFiles(pendingFiles, ttlSeconds, password);
+  closePanel();
 });
 
-ttlCancel.addEventListener('click', () => {
-  closeTTLPanel();
-});
+cancelAttach.addEventListener('click', () => closePanel());
 
+// Unlock action (receiver)
+log.addEventListener('click', async (e) => {
+  const btn = e.target.closest('.btnUnlock');
+  if (!btn) return;
+  const id = btn.dataset.id;
+  const row = log.querySelector(`.row[data-id="${CSS.escape(id)}"]`);
+  const pwf = row?.querySelector('.pwfield');
+  const pass = pwf?.value || '';
+  try{
+    const res = await fetch(`/unlock/${encodeURIComponent(id)}`, {
+      method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ password: pass })
+    });
+    if (!res.ok) {
+      const j = await res.json().catch(()=>({}));
+      throw new Error(j.error || 'Unlock failed');
+    }
+  }catch(err){
+    // Server will either unlock (and send event) or recall (and send recalled)
+    // We can show a temporary toast if needed:
+    // writeText('them', '⚠️ ' + (err?.message || 'Unlock failed'));
+    console.warn(err);
+  }
+});
 
 // Menus
 log.addEventListener('click', (e) => {
@@ -376,10 +497,8 @@ log.addEventListener('click', (e) => {
   }
 });
 document.addEventListener('click', (e) => {
-  const inside = e.target.closest('.menu, .kebab, #ttlPanel');
-  if (!inside) {
-    document.querySelectorAll('.menu.open').forEach(m => m.classList.remove('open'));
-  }
+  const inside = e.target.closest('.menu, .kebab, .attach-panel');
+  if (!inside) document.querySelectorAll('.menu.open').forEach(m => m.classList.remove('open'));
 });
 </script>
 </body>
