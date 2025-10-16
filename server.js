@@ -13,18 +13,18 @@ const app = express();
 app.use(cors());
 app.use(express.static(__dirname));
 
-// Serve SPA for any path
+// health endpoint
+app.get('/health', (_req, res) => res.status(200).json({ ok: true }));
+
+// Serve SPA for any other path
 app.get('*', (_req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 
 const server = http.createServer(app);
-const wss = new WebSocketServer({ server });
+// IMPORTANT: fixed WS path to avoid wildcard route conflicts
+const wss = new WebSocketServer({ server, path: '/ws' });
 
-// Keep-alive (some proxies idle-out WS)
-setInterval(() => {
-  wss.clients.forEach(ws => {
-    try { ws.ping(); } catch {}
-  });
-}, 25000);
+// Keep-alive pings
+setInterval(() => { wss.clients.forEach(ws => { try { ws.ping(); } catch {} }); }, 25000);
 
 // In-memory rooms
 const rooms = new Map(); // id -> Set(ws)
@@ -38,8 +38,15 @@ function getClientIP(req) {
   return ip || 'unknown';
 }
 function roomFromReq(req) {
-  const p = (new URL(req.url, 'http://x')).pathname.replace(/^\/+|\/+$/g,'');
-  return p || 'chat';
+  // Room is derived from HTTP Referer path or ?room=... header fallback
+  const ref = req.headers['referer'] || '/';
+  try {
+    const url = new URL(ref);
+    const p = (url.pathname || '/').replace(/^\/+|\/+$/g, '');
+    return p || 'chat';
+  } catch {
+    return 'chat';
+  }
 }
 function users(room){ const set = rooms.get(room); return set ? [...set].map(c=>meta.get(c)?.username).filter(Boolean) : []; }
 function broadcast(room, obj, exclude) {
@@ -83,4 +90,4 @@ wss.on('connection', (ws, req) => {
 });
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, ()=> console.log('1:1 chat + files on', PORT));
+server.listen(PORT, ()=> console.log('1:1 chat + files (v3.2) on', PORT));
