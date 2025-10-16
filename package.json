@@ -1,6 +1,6 @@
 {
-  "name": "haliport-one2one-v3-2",
-  "version": "1.0.2",
+  "name": "haliport-one2one-v2",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
     "start": "node server.js"
