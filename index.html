@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -8,141 +7,106 @@
 <style>
   :root{ --bg:#0c0f13; --panel:#141a22; --panel2:#0f141b; --text:#e7edf4; --muted:#9fb0c2; --accent:#57acff; --border:#203041; }
   *{box-sizing:border-box} html,body{height:100%} body{margin:0;background:var(--bg);color:var(--text);font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Arial}
-  .shell{display:grid;grid-template-columns:320px 1fr;height:100vh}
-  .side{background:var(--panel);border-right:1px solid var(--border);padding:16px}
-  h1{margin:0 0 8px 0;font-size:20px}
-  .card{background:var(--panel2);border:1px solid var(--border);border-radius:12px;padding:12px;margin-top:12px}
-  label{display:block;margin:8px 0 4px;color:var(--muted);font-size:.9rem}
-  input{width:100%;padding:10px;border-radius:10px;border:1px solid var(--border);background:#0f141b;color:#e7edf4;outline:none}
-  button{margin-top:10px;padding:10px 12px;border-radius:10px;border:0;background:#1b87f3;color:white;cursor:pointer;width:100%}
-  .main{display:flex;flex-direction:column}
-  .header{height:64px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;padding:12px 18px}
+  .app{display:flex;flex-direction:column;min-height:100vh}
+  .header{height:64px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;padding:12px 18px;background:var(--panel)}
   .scroll{flex:1;overflow:auto;padding:18px}
-  .row{display:flex;margin:6px 0}
+  .row{display:flex;margin:8px 0}
   .me{justify-content:flex-end}
-  .bubble{max-width:70%;background:#1d2430;border:1px solid var(--border);padding:10px 12px;border-radius:12px}
+  .bubble{max-width:900px;width:fit-content;background:#1d2430;border:1px solid var(--border);padding:12px 14px;border-radius:14px;font-size:1.05rem;line-height:1.5}
   .me .bubble{background:#0e2a49;border-color:#0b3a63}
-  .meta{color:#9fb0c2;font-size:.8rem;margin-top:4px;text-align:right}
-  .composer{display:flex;gap:8px;border-top:1px solid var(--border);padding:12px 16px;background:var(--panel)}
-  .composer input{flex:1}
-  .err{color:#ff6b6b;margin-top:6px;font-size:.9rem}
+  .meta{color:#9fb0c2;font-size:.85rem;margin-top:6px;text-align:right}
+  /* BIG composer */
+  .composer{position:sticky;bottom:0;display:flex;gap:12px;align-items:flex-end;border-top:1px solid var(--border);padding:14px 16px;background:var(--panel)}
+  .textarea{flex:1;min-height:56px;max-height:220px;padding:14px;border-radius:14px;border:1px solid var(--border);background:var(--panel2);color:var(--text);resize:vertical;font-size:1.05rem;line-height:1.5;outline:none}
+  .send{background:#1b87f3;border:0;color:#fff;padding:14px 22px;border-radius:14px;cursor:pointer;font-size:1rem}
+  .tip{color:#9fb0c2;font-size:.9rem;margin:0 18px 8px}
 </style>
 </head>
 <body>
-<div class="shell">
-  <aside class="side">
-    <h1>🍁 Haliport</h1>
-    <div class="card">
-      <label>Room (shareable)</label>
-      <input id="room" placeholder="e.g. project-omega" />
-      <label>Your name</label>
-      <input id="name" placeholder="e.g. Sarah" />
-      <button id="join">Join Chat</button>
-      <div id="e" class="err" style="display:none"></div>
-      <p style="color:#9fb0c2;font-size:.9rem;margin-top:10px">
-        Share this page <b>with ?room=ROOM</b> so only people who have the URL can join.
-        Each room allows <b>exactly two people</b>.
-      </p>
-    </div>
-    <div class="card">
-      <p style="margin:0;color:#9fb0c2">Tip: Create a unique room, like <i>team-47-oct15</i>, then send your partner the link:
-      <br><code>https://YOUR_SITE.onrender.com/?room=team-47-oct15</code></p>
-    </div>
-  </aside>
+<div class="app">
+  <div class="header">
+    <div><b id="title">Connecting…</b></div>
+    <div id="presence" style="color:#9fb0c2">—</div>
+  </div>
 
-  <main class="main">
-    <div class="header">
-      <div><b id="title">Not joined</b></div>
-      <div id="presence" style="color:#9fb0c2">—</div>
-    </div>
-    <div class="scroll" id="log"><div style="color:#9fb0c2">Join a room on the left to start chatting.</div></div>
-    <div class="composer">
-      <input id="msg" placeholder="Type a message" disabled />
-      <button id="send" disabled>Send</button>
-    </div>
-  </main>
+  <div class="scroll" id="log"><div style="color:#9fb0c2">Open this URL on two devices to start chatting.</div></div>
+  <p class="tip">Press <b>Enter</b> to send • <b>Shift+Enter</b> for a new line</p>
+
+  <div class="composer">
+    <textarea id="msg" class="textarea" placeholder="Type a message"></textarea>
+    <button id="send" class="send">Send</button>
+  </div>
 </div>
 
 <script>
-const qs = new URLSearchParams(location.search);
-const roomField = document.getElementById('room');
-const nameField = document.getElementById('name');
-const e = document.getElementById('e');
 const log = document.getElementById('log');
 const title = document.getElementById('title');
 const presence = document.getElementById('presence');
 const msgInput = document.getElementById('msg');
 const sendBtn = document.getElementById('send');
-const joinBtn = document.getElementById('join');
 
-roomField.value = qs.get('room') || '';
+let myName = '', myRoom = roomFromPath();
 
-let ws, joined = false, myName = '', myRoom = '';
+function roomFromPath(){
+  const p = location.pathname.replace(/^\/+|\/+$/g,'');
+  return p || 'chat';
+}
 
-function wsURL(){ return (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host; }
+function wsURL(){ 
+  const proto = location.protocol === 'https:' ? 'wss://' : 'ws://';
+  return proto + location.host + location.pathname; // include path as room id
+}
 
 function write(kind, text, ts=Date.now()){
   const row = document.createElement('div');
   row.className = 'row ' + (kind==='me' ? 'me' : '');
-  row.innerHTML = `<div class="bubble"><div>${escape(text)}</div><div class="meta">${new Date(ts).toLocaleTimeString()}</div></div>`;
+  row.innerHTML = `<div class="bubble"><div>${escape(text)}</div><div class="meta">${new Date(ts).toLocaleString()}</div></div>`;
   log.appendChild(row);
   log.scrollTop = log.scrollHeight;
 }
 
 function escape(s){ return String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
-function setPresence(users){
-  presence.textContent = users && users.length ? ('In room: ' + users.join(', ')) : '—';
-}
-
-joinBtn.onclick = () => {
-  e.style.display='none';
-  const room = roomField.value.trim();
-  const name = nameField.value.trim();
-  if (!room || !name){ e.textContent='Enter room and name'; e.style.display='block'; return; }
-
-  ws = new WebSocket(wsURL());
-  ws.onopen = () => {
-    ws.send(JSON.stringify({ type:'join', room, username:name }));
-  };
-  ws.onmessage = (ev) => {
-    const data = JSON.parse(ev.data);
-    if (data.type === 'room_full'){
-      e.textContent = 'Room already has two people. Pick another room name.';
-      e.style.display='block';
-      ws.close();
-      return;
-    }
-    if (data.type === 'joined'){
-      joined = true; myName = name; myRoom = room;
-      title.textContent = 'Room: ' + room;
-      msgInput.disabled = false; sendBtn.disabled = false;
-      setPresence(data.users);
-      const params = new URLSearchParams(location.search);
-      params.set('room', room);
-      history.replaceState(null,'','?'+params.toString());
-    }
-    if (data.type === 'presence'){ setPresence(data.users); }
-    if (data.type === 'chat'){
-      const who = data.from === myName ? 'me' : 'them';
-      write(who, data.text, data.ts);
-    }
-  };
-  ws.onclose = () => {
-    if (joined){
-      write('them','[Disconnected]');
-      msgInput.disabled = true; sendBtn.disabled = true;
-      presence.textContent = '—';
-    }
-  };
+// Connect immediately
+const ws = new WebSocket(wsURL());
+ws.onopen = () => { title.textContent = 'Room: ' + myRoom; };
+ws.onmessage = (ev) => {
+  const data = JSON.parse(ev.data);
+  if (data.type === 'room_full') {
+    write('them', 'Room is full. Create a different link path, e.g., /chat-1234');
+    msgInput.disabled = true; sendBtn.disabled = true;
+    presence.textContent = 'Room full';
+    return;
+  }
+  if (data.type === 'welcome') {
+    myName = data.yourName;
+    presence.textContent = 'In room: ' + (data.users || []).join(', ');
+    title.textContent = 'Room: ' + data.room + ' • You: ' + myName;
+    return;
+  }
+  if (data.type === 'presence') {
+    presence.textContent = 'In room: ' + (data.users || []).join(', ');
+    return;
+  }
+  if (data.type === 'chat') {
+    const who = data.from === myName ? 'me' : 'them';
+    write(who, data.text, data.ts);
+  }
+};
+ws.onclose = () => {
+  presence.textContent = 'Disconnected';
 };
 
-sendBtn.onclick = () => {
+function send() {
   const text = msgInput.value.trim();
   if (!text) return;
   ws.send(JSON.stringify({ type:'chat', text }));
   msgInput.value = '';
-};
+}
+sendBtn.onclick = send;
+msgInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+});
 </script>
 </body>
 </html>
