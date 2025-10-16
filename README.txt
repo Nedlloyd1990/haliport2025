@@ -1,24 +1,18 @@
-Haliport One-to-One v2 (No DB) — direct chat via URL path, username = IP
 
-How it works
-------------
-- The room is the URL path. Example:
-    https://YOUR.onrender.com/project-omega   -> room "project-omega"
-    https://YOUR.onrender.com/                -> room "chat"
-- No join screen. Connects automatically when you open the link.
-- Each room allows exactly TWO people.
-- Your "name" shown in presence is your IP (from X-Forwarded-For / remoteAddress).
+Haliport One-to-One v3 — chat + file send (no DB)
 
-Run locally
------------
+- Room is the URL path (e.g., /alpha).
+- Auto-connect. Username is your IP (from X-Forwarded-For / remoteAddress).
+- Files are relayed peer-to-peer via WebSocket (no server storage).
+- Max file size: 10 MB (tweak MAX_FILE in index.html).
+- Two users per room.
+
+Run:
 npm install
 npm start
-Open http://localhost:3000/alpha in two browsers to test
+Open http://localhost:3000/alpha in two tabs/devices.
 
-Deploy on Render
-----------------
-- New → Web Service → connect repo
-- Build Command: npm install
-- Start Command: npm start
-- Enable WebSockets: ON
-- No environment variables needed
+Render:
+Build: npm install
+Start: npm start
+Enable WebSockets: ON
