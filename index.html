@@ -4,7 +4,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>🍁 Haliport — 1:1 Chat + Files</title>
+<title>🍁 Haliport — 1:1 Chat + Files (v3.2)</title>
 <style>
   :root{ --bg:#0c0f13; --panel:#141a22; --panel2:#0f141b; --text:#e7edf4; --muted:#9fb0c2; --accent:#57acff; --border:#203041; }
   *{box-sizing:border-box} html,body{height:100%} body{margin:0;background:var(--bg);color:var(--text);font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Arial}
@@ -49,7 +49,7 @@
 </div>
 
 <script>
-const MAX_FILE = 10 * 1024 * 1024; // 10 MB
+const MAX_FILE = 10 * 1024 * 1024;
 const log = document.getElementById('log');
 const title = document.getElementById('title');
 const presence = document.getElementById('presence');
@@ -63,33 +63,23 @@ function roomFromPath(){ const p = location.pathname.replace(/^\\/+|\\/+$/g,'');
 function escape(s){ return String(s).replace(/[&<>\"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',\"'\":'&#39;'}[c])); }
 function write(kind, html){ const row=document.createElement('div'); row.className='row '+(kind==='me'?'me':''); row.innerHTML=html; log.appendChild(row); log.scrollTop=log.scrollHeight; }
 
-// Resilient WebSocket connect: try candidate URLs
-function wsConnect(){
-  const proto = location.protocol==='https:'?'wss://':'ws://';
-  const host = location.host;
-  const path = location.pathname;
-  const candidates = [
-    proto + host + path,       // with path as room
-    proto + host + '/',        // root
-    proto + host               // host only
-  ];
-  let i = 0;
-  return new Promise((resolve, reject)=>{
-    const tryNext = () => {
-      if (i >= candidates.length) return reject(new Error('All WS URLs failed'));
-      const url = candidates[i++];
-      const ws = new WebSocket(url);
-      ws.onopen = () => resolve(ws);
-      ws.onerror = (e) => { errorBox.textContent = 'WebSocket failed: ' + url; tryNext(); };
-    };
-    tryNext();
-  });
+// Fixed WS path '/ws' (avoids path conflicts)
+function wsURL(){
+  const proto = location.protocol === 'https:' ? 'wss://' : 'ws://';
+  return proto + location.host + '/ws';
 }
 
 let myName = '', myRoom = roomFromPath(), ws;
-wsConnect().then(sock => {
-  ws = sock;
-  title.textContent = 'Room: ' + myRoom;
+function connectWS(){
+  try {
+    ws = new WebSocket(wsURL());
+  } catch (e) {
+    errorBox.textContent = 'WebSocket ctor failed: ' + e.message;
+    return;
+  }
+  ws.onopen = () => { title.textContent = 'Room: ' + myRoom; errorBox.textContent=''; };
+  ws.onerror = () => { errorBox.textContent = 'WebSocket error. If on Render, ensure WebSockets are enabled.'; };
+  ws.onclose = () => { presence.textContent = 'Disconnected'; };
   ws.onmessage = (ev) => {
     const data = JSON.parse(ev.data);
     if (data.type === 'room_full'){ write('them','<div class="card">Room is full. Change the path (e.g., /chat-1234)</div>'); disable(); return; }
@@ -100,10 +90,8 @@ wsConnect().then(sock => {
     if (data.type === 'file_chunk'){ handleIncomingFileChunk(data); return; }
     if (data.type === 'file_done'){ handleIncomingFileDone(data); return; }
   };
-  ws.onclose = () => { presence.textContent = 'Disconnected'; };
-}).catch(err => {
-  errorBox.textContent = 'Could not connect WebSocket. Make sure WebSockets are enabled on your host. ('+err.message+')';
-});
+}
+connectWS();
 
 function disable(){ msgInput.disabled=true; sendBtn.disabled=true; fileBtn.disabled=true; }
 
@@ -117,7 +105,7 @@ function send() {
 sendBtn.onclick = send;
 msgInput.addEventListener('keydown', e => { if (e.key==='Enter' && !e.shiftKey){ e.preventDefault(); send(); } });
 
-// File send (chunked, base64)
+// File send (chunked base64)
 fileBtn.onclick = () => fileInput.click();
 fileInput.onchange = async () => {
   const f = fileInput.files[0];
