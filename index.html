@@ -15,6 +15,7 @@
   .bubble{max-width:900px;width:fit-content;background:#1d2430;border:1px solid var(--border);padding:12px 14px;border-radius:14px;font-size:1.05rem;line-height:1.5;position:relative}
   .me .bubble{background:#0e2a49;border-color:#0b3a63}
   .meta{color:#9fb0c2;font-size:.85rem;margin-top:6px;text-align:right}
+  .sys{color:#9fb0c2;font-size:.85rem;margin-top:6px}
   .composer{position:sticky;bottom:0;display:flex;gap:12px;align-items:flex-end;border-top:1px solid var(--border);padding:14px 16px;background:var(--panel)}
   .textarea{flex:1;min-height:56px;max-height:220px;padding:14px;border-radius:14px;border:1px solid var(--border);background:var(--panel2);color:var(--text);resize:vertical;font-size:1.05rem;line-height:1.5;outline:none}
   .send{background:#1b87f3;border:0;color:#fff;padding:14px 22px;border-radius:14px;cursor:pointer;font-size:1rem}
@@ -23,7 +24,6 @@
   .filethumb{max-width:360px;border-radius:10px;display:block}
   .filename{word-break:break-all}
   .tip{color:#9fb0c2;font-size:.9rem;margin:0 18px 8px}
-
   /* three-dot */
   .kebab { position:absolute; top:8px; right:8px; background:transparent; border:0; color:#c9d6e2; cursor:pointer; padding:4px; opacity:.7 }
   .kebab:hover { opacity:1 }
@@ -31,7 +31,7 @@
   .menu.open { display:block }
   .menu button { width:100%; text-align:left; padding:10px 12px; background:transparent; border:0; color:#e7edf4; cursor:pointer; font-size:.95rem }
   .menu button:hover { background:#0f141b }
-  .tomb { font-style:italic; color:#9fb0c2 }
+  .tomb { font-style:italic; color:#cfd9e6 }
 </style>
 </head>
 <body>
@@ -42,7 +42,7 @@
   </div>
 
   <div class="scroll" id="log"><div style="color:#9fb0c2">Open this URL on two devices to start chatting.</div></div>
-  <p class="tip">Press <b>Enter</b> to send • <b>Shift+Enter</b> for a new line • Click the paperclip to attach files • Use the ⋯ menu to recall</p>
+  <p class="tip">Enter to send • Shift+Enter newline • Paperclip to attach • ⋯ to recall</p>
 
   <div class="composer">
     <button id="attach" class="iconbtn" title="Attach files" aria-label="Attach files">
@@ -69,17 +69,21 @@ let myName = '', myRoom = roomFromPath();
 
 function roomFromPath(){ const p = location.pathname.replace(/^\/+|\/+$/g,''); return p || 'chat'; }
 function wsURL(){ const proto = location.protocol === 'https:' ? 'wss://' : 'ws://'; return proto + location.host + location.pathname; }
-function humanSize(bytes){ const u=['B','KB','MB','GB']; let v=bytes,i=0; while(v>=1024&&i<u.length-1){v/=1024;i++;} return v.toFixed(v>=10||i===0?0:1)+' '+u[i]; }
-function escapeHTML(s){ return String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function humanSize(b){ const u=['B','KB','MB','GB']; let v=b,i=0; while(v>=1024&&i<u.length-1){v/=1024;i++;} return v.toFixed(v>=10||i===0?0:1)+' '+u[i]; }
+function esc(s){ return String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 
-function bubbleMenu(id, isMine){
-  // Only show Recall for my own items
-  return `
-    <button class="kebab" data-action="open-menu" data-id="${id}" ${isMine ? '' : 'style="display:none"'} title="More">⋯</button>
-    <div class="menu" data-menu-for="${id}">
-      <button data-action="recall" data-id="${id}">Recall</button>
-    </div>
-  `;
+function bubbleMenu(id, mine){ return `
+  <button class="kebab" data-action="open-menu" data-id="${id}" ${mine?'':'style="display:none"'} title="More">⋯</button>
+  <div class="menu" data-menu-for="${id}">
+    <button data-action="recall" data-id="${id}">Recall</button>
+  </div>`; }
+
+// Renders a tiny system line under a bubble row
+function appendSystemLine(rowEl, text){
+  const sys = document.createElement('div');
+  sys.className = 'sys';
+  sys.textContent = text;
+  rowEl.appendChild(sys);
 }
 
 function writeText(kind, id, text, ts=Date.now()){
@@ -89,7 +93,7 @@ function writeText(kind, id, text, ts=Date.now()){
   row.innerHTML = `
     <div class="bubble">
       ${bubbleMenu(id, kind==='me')}
-      <div>${escapeHTML(text)}</div>
+      <div>${esc(text)}</div>
       <div class="meta">${new Date(ts).toLocaleString()}</div>
     </div>`;
   log.appendChild(row);
@@ -102,8 +106,8 @@ function writeFile(kind, id, file, ts=Date.now()){
   row.dataset.id = id;
   const isImg = /^image\//.test(file.mime || '');
   const content = isImg
-    ? `<img class="filethumb" src="${file.url}" alt="${escapeHTML(file.name)}" />`
-    : `<a class="filename" href="${file.url}" download>${escapeHTML(file.name)}</a> <span style="color:#9fb0c2">(${humanSize(file.size)})</span>`;
+    ? `<img class="filethumb" src="${file.url}" alt="${esc(file.name)}" />`
+    : `<a class="filename" href="${file.url}" download>${esc(file.name)}</a> <span style="color:#9fb0c2">(${humanSize(file.size)})</span>`;
   row.innerHTML = `
     <div class="bubble">
       ${bubbleMenu(id, kind==='me')}
@@ -114,67 +118,79 @@ function writeFile(kind, id, file, ts=Date.now()){
   log.scrollTop = log.scrollHeight;
 }
 
-function removeById(id){
-  const el = log.querySelector(`.row[data-id="${CSS.escape(id)}"]`);
-  if (!el) return;
-  el.querySelector('.bubble').innerHTML = `<div class="tomb">This item was recalled.</div>`;
-  // Optional: completely remove after a short delay
-  setTimeout(()=> el.remove(), 500);
+function recallForReceiver(id, sysText){
+  // Replace content with tombstone and keep a system note below
+  const row = log.querySelector(`.row[data-id="${CSS.escape(id)}"]`);
+  if (!row) return;
+  const bubble = row.querySelector('.bubble');
+  if (bubble){
+    bubble.innerHTML = `<div class="tomb">This item was recalled by the sender.</div>`;
+  }
+  appendSystemLine(row, sysText || 'This item was recalled by the sender.');
+  setTimeout(()=> row.scrollIntoView({behavior:'smooth', block:'nearest'}), 0);
 }
 
-// ---- WebSocket ----
+function markOwnerRecalled(id, sysText, newUrl){
+  // Keep bubble content; just add system line and optionally update URL (gated)
+  const row = log.querySelector(`.row[data-id="${CSS.escape(id)}"]`);
+  if (!row) return;
+  if (newUrl) {
+    const a = row.querySelector('.filename');
+    const img = row.querySelector('.filethumb');
+    if (a) a.href = newUrl;
+    if (img) img.src = newUrl;
+  }
+  appendSystemLine(row, sysText || 'You recalled this. The other person can no longer see it.');
+  setTimeout(()=> row.scrollIntoView({behavior:'smooth', block:'nearest'}), 0);
+}
+
+// ---- WS ----
 const ws = new WebSocket(wsURL());
 ws.onopen = () => { title.textContent = 'Room: ' + myRoom; };
 ws.onmessage = (ev) => {
-  const data = JSON.parse(ev.data);
-
-  if (data.type === 'room_full') {
+  const d = JSON.parse(ev.data);
+  if (d.type === 'room_full') {
     writeText('them', 'Room is full. Create a new path, e.g., /chat-1234');
-    msgInput.disabled = true; sendBtn.disabled = true; attachBtn.disabled = true; fileInput.disabled = true;
-    presence.textContent = 'Room full';
-    return;
+    msgInput.disabled = sendBtn.disabled = attachBtn.disabled = fileInput.disabled = true;
+    presence.textContent = 'Room full'; return;
   }
-  if (data.type === 'welcome') {
-    myName = data.yourName;
-    presence.textContent = 'In room: ' + (data.users || []).join(', ');
-    title.textContent = 'Room: ' + data.room + ' • You: ' + myName;
-    return;
+  if (d.type === 'welcome') {
+    myName = d.yourName;
+    presence.textContent = 'In room: ' + (d.users || []).join(', ');
+    title.textContent = 'Room: ' + d.room + ' • You: ' + myName; return;
   }
-  if (data.type === 'presence') {
-    presence.textContent = 'In room: ' + (data.users || []).join(', ');
-    return;
+  if (d.type === 'presence') {
+    presence.textContent = 'In room: ' + (d.users || []).join(', '); return;
   }
-  if (data.type === 'chat') {
-    const who = data.from === myName ? 'me' : 'them';
-    writeText(who, data.id, data.text, data.ts);
-    return;
+  if (d.type === 'chat') {
+    const who = d.from === myName ? 'me' : 'them';
+    writeText(who, d.id, d.text, d.ts); return;
   }
-  if (data.type === 'file') {
-    const who = data.from === myName ? 'me' : 'them';
-    writeFile(who, data.id, data.file, data.ts);
-    return;
+  if (d.type === 'file') {
+    const who = d.from === myName ? 'me' : 'them';
+    writeFile(who, d.id, d.file, d.ts); return;
   }
-  if (data.type === 'recalled') {
-    removeById(data.id);
-    return;
+  if (d.type === 'recalled') { // receiver view
+    recallForReceiver(d.id, d.sys); return;
   }
-  if (data.type === 'error') {
-    // optional toast
-    writeText('them', '⚠️ ' + (data.message || 'Error'));
-    return;
+  if (d.type === 'recalled_owner') { // sender view
+    markOwnerRecalled(d.id, d.sys, d.newUrl); return;
+  }
+  if (d.type === 'error') {
+    writeText('them', '⚠️ ' + (d.message || 'Error')); return;
   }
 };
 ws.onclose = () => { presence.textContent = 'Disconnected'; };
 
-// ---- Send text (only render on echo from server so we have the ID) ----
-function send() {
+// ---- Send text ----
+function send(){
   const text = msgInput.value.trim();
   if (!text) return;
   ws.send(JSON.stringify({ type:'chat', text }));
   msgInput.value = '';
 }
 
-// ---- Upload files ----
+// ---- Upload ----
 async function uploadFiles(files){
   if (!files || files.length === 0) return;
   const form = new FormData();
@@ -187,50 +203,36 @@ async function uploadFiles(files){
     }
   }catch(err){
     writeText('them', '⚠️ ' + (err?.message || 'Upload failed'));
-  }finally{
-    fileInput.value = '';
-  }
+  }finally{ fileInput.value = ''; }
 }
 
-// ---- Recall action via menu ----
-function recall(id){
-  ws.send(JSON.stringify({ type:'recall', id }));
-}
+// ---- Recall ----
+function recall(id){ ws.send(JSON.stringify({ type:'recall', id })); }
 
 // ---- UI wiring ----
 sendBtn.onclick = send;
-msgInput.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
-});
+msgInput.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey){ e.preventDefault(); send(); }});
 attachBtn.addEventListener('click', () => fileInput.click());
 fileInput.addEventListener('change', (e) => uploadFiles(e.target.files));
 
-// Delegate menu interactions
+// Menus
 log.addEventListener('click', (e) => {
-  const btn = e.target.closest('button');
-  if (!btn) return;
-
-  const action = btn.dataset.action;
-  const id = btn.dataset.id;
-
+  const btn = e.target.closest('button'); if (!btn) return;
+  const action = btn.dataset.action; const id = btn.dataset.id;
   if (action === 'open-menu') {
-    // Close all others
     document.querySelectorAll('.menu.open').forEach(m => m.classList.remove('open'));
     const menu = log.querySelector(`.menu[data-menu-for="${CSS.escape(id)}"]`);
     if (menu) menu.classList.add('open');
   }
   if (action === 'recall') {
-    // Hide menu & send
     const menu = log.querySelector(`.menu[data-menu-for="${CSS.escape(id)}"]`);
     if (menu) menu.classList.remove('open');
     recall(id);
   }
 });
-
-// Close menus when clicking elsewhere
 document.addEventListener('click', (e) => {
-  const insideMenu = e.target.closest('.menu, .kebab');
-  if (!insideMenu) document.querySelectorAll('.menu.open').forEach(m => m.classList.remove('open'));
+  const inside = e.target.closest('.menu, .kebab');
+  if (!inside) document.querySelectorAll('.menu.open').forEach(m => m.classList.remove('open'));
 });
 </script>
 </body>
