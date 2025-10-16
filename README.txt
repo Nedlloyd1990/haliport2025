@@ -1,23 +1,19 @@
-
-Haliport One-to-One (No DB) — anyone with the URL can join a private room.
+Haliport One-to-One v2 (No DB) — direct chat via URL path, username = IP
 
 How it works
 ------------
-- A "room" is just a name in the URL: https://YOUR.onrender.com/?room=team-47
+- The room is the URL path. Example:
+    https://YOUR.onrender.com/project-omega   -> room "project-omega"
+    https://YOUR.onrender.com/                -> room "chat"
+- No join screen. Connects automatically when you open the link.
 - Each room allows exactly TWO people.
-- No database or login. Everything is in memory; if the server restarts, history is gone.
-
-Files
------
-- package.json  : start script + deps
-- server.js     : Express + ws WebSocket room server
-- index.html    : UI with name + room + chat
+- Your "name" shown in presence is your IP (from X-Forwarded-For / remoteAddress).
 
 Run locally
 -----------
 npm install
 npm start
-Open http://localhost:3000/ and enter a room + your name
+Open http://localhost:3000/alpha in two browsers to test
 
 Deploy on Render
 ----------------
@@ -25,5 +21,4 @@ Deploy on Render
 - Build Command: npm install
 - Start Command: npm start
 - Enable WebSockets: ON
-- (No environment variables needed)
-- After deploy, share: https://YOUR.onrender.com/?room=ANYTHING
+- No environment variables needed
