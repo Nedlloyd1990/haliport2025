@@ -1,10 +1,9 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>🍁 Haliport — 1:1 Chat + Files (v3.2)</title>
+<title>🍁 Haliport — Private 1:1 Chat</title>
 <style>
   :root{ --bg:#0c0f13; --panel:#141a22; --panel2:#0f141b; --text:#e7edf4; --muted:#9fb0c2; --accent:#57acff; --border:#203041; }
   *{box-sizing:border-box} html,body{height:100%} body{margin:0;background:var(--bg);color:var(--text);font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Arial}
@@ -16,17 +15,11 @@
   .bubble{max-width:900px;width:fit-content;background:#1d2430;border:1px solid var(--border);padding:12px 14px;border-radius:14px;font-size:1.05rem;line-height:1.5}
   .me .bubble{background:#0e2a49;border-color:#0b3a63}
   .meta{color:#9fb0c2;font-size:.85rem;margin-top:6px;text-align:right}
-  .card{max-width:900px;width:fit-content;background:#16202c;border:1px solid var(--border);padding:12px 14px;border-radius:12px}
-  .card .name{font-weight:600;margin-bottom:6px}
-  .progress{height:6px;background:#0a1220;border-radius:6px;overflow:hidden;margin-top:6px}
-  .bar{height:100%;background:#1b87f3;width:0%}
+  /* BIG composer */
   .composer{position:sticky;bottom:0;display:flex;gap:12px;align-items:flex-end;border-top:1px solid var(--border);padding:14px 16px;background:var(--panel)}
   .textarea{flex:1;min-height:56px;max-height:220px;padding:14px;border-radius:14px;border:1px solid var(--border);background:var(--panel2);color:var(--text);resize:vertical;font-size:1.05rem;line-height:1.5;outline:none}
   .send{background:#1b87f3;border:0;color:#fff;padding:14px 22px;border-radius:14px;cursor:pointer;font-size:1rem}
-  .attach{background:#243041;border:1px solid var(--border);color:#e7edf4;padding:12px 14px;border-radius:12px;cursor:pointer}
   .tip{color:#9fb0c2;font-size:.9rem;margin:0 18px 8px}
-  a.dl{color:#9ad0ff}
-  .err{color:#ff8a8a;margin:8px 18px}
 </style>
 </head>
 <body>
@@ -36,131 +29,84 @@
     <div id="presence" style="color:#9fb0c2">—</div>
   </div>
 
-  <div class="scroll" id="log"><div style="color:#9fb0c2">Open this URL on two devices to chat or send files.</div></div>
-  <p class="tip">Press <b>Enter</b> to send • <b>Shift+Enter</b> for a new line • Files up to <b>10 MB</b></p>
-  <div id="error" class="err"></div>
+  <div class="scroll" id="log"><div style="color:#9fb0c2">Open this URL on two devices to start chatting.</div></div>
+  <p class="tip">Press <b>Enter</b> to send • <b>Shift+Enter</b> for a new line</p>
 
   <div class="composer">
-    <button id="pick" class="attach">📎 Attach</button>
-    <input id="file" type="file" style="display:none">
     <textarea id="msg" class="textarea" placeholder="Type a message"></textarea>
     <button id="send" class="send">Send</button>
   </div>
 </div>
 
 <script>
-const MAX_FILE = 10 * 1024 * 1024;
 const log = document.getElementById('log');
 const title = document.getElementById('title');
 const presence = document.getElementById('presence');
-const errorBox = document.getElementById('error');
 const msgInput = document.getElementById('msg');
 const sendBtn = document.getElementById('send');
-const fileBtn = document.getElementById('pick');
-const fileInput = document.getElementById('file');
 
-function roomFromPath(){ const p = location.pathname.replace(/^\\/+|\\/+$/g,''); return p || 'chat'; }
-function escape(s){ return String(s).replace(/[&<>\"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',\"'\":'&#39;'}[c])); }
-function write(kind, html){ const row=document.createElement('div'); row.className='row '+(kind==='me'?'me':''); row.innerHTML=html; log.appendChild(row); log.scrollTop=log.scrollHeight; }
+let myName = '', myRoom = roomFromPath();
 
-// Fixed WS path '/ws' (avoids path conflicts)
-function wsURL(){
-  return 'wss://haliport2025.onrender.com/ws';
+function roomFromPath(){
+  const p = location.pathname.replace(/^\/+|\/+$/g,'');
+  return p || 'chat';
 }
 
-let myName = '', myRoom = roomFromPath(), ws;
-function connectWS(){
-  try {
-    ws = new WebSocket(wsURL());
-  } catch (e) {
-    errorBox.textContent = 'WebSocket ctor failed: ' + e.message;
+function wsURL(){ 
+  const proto = location.protocol === 'https:' ? 'wss://' : 'ws://';
+  return proto + location.host + location.pathname; // include path as room id
+}
+
+function write(kind, text, ts=Date.now()){
+  const row = document.createElement('div');
+  row.className = 'row ' + (kind==='me' ? 'me' : '');
+  row.innerHTML = `<div class="bubble"><div>${escape(text)}</div><div class="meta">${new Date(ts).toLocaleString()}</div></div>`;
+  log.appendChild(row);
+  log.scrollTop = log.scrollHeight;
+}
+
+function escape(s){ return String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+// Connect immediately
+const ws = new WebSocket(wsURL());
+ws.onopen = () => { title.textContent = 'Room: ' + myRoom; };
+ws.onmessage = (ev) => {
+  const data = JSON.parse(ev.data);
+  if (data.type === 'room_full') {
+    write('them', 'Room is full. Create a different link path, e.g., /chat-1234');
+    msgInput.disabled = true; sendBtn.disabled = true;
+    presence.textContent = 'Room full';
     return;
   }
-  ws.onopen = () => { title.textContent = 'Room: ' + myRoom; errorBox.textContent=''; };
-  ws.onerror = () => { errorBox.textContent = 'WebSocket error. If on Render, ensure WebSockets are enabled.'; };
-  ws.onclose = () => { presence.textContent = 'Disconnected'; };
-  ws.onmessage = (ev) => {
-    const data = JSON.parse(ev.data);
-    if (data.type === 'room_full'){ write('them','<div class="card">Room is full. Change the path (e.g., /chat-1234)</div>'); disable(); return; }
-    if (data.type === 'welcome'){ myName=data.yourName; presence.textContent='In room: '+(data.users||[]).join(', '); title.textContent='Room: '+data.room+' • You: '+myName; return; }
-    if (data.type === 'presence'){ presence.textContent='In room: '+(data.users||[]).join(', '); return; }
-    if (data.type === 'chat'){ const who=data.from===myName?'me':'them'; write(who, `<div class="bubble"><div>${escape(data.text)}</div><div class="meta">${new Date(data.ts).toLocaleString()}</div></div>`); return; }
-    if (data.type === 'file_meta'){ handleIncomingFileMeta(data); return; }
-    if (data.type === 'file_chunk'){ handleIncomingFileChunk(data); return; }
-    if (data.type === 'file_done'){ handleIncomingFileDone(data); return; }
-  };
-}
-connectWS();
+  if (data.type === 'welcome') {
+    myName = data.yourName;
+    presence.textContent = 'In room: ' + (data.users || []).join(', ');
+    title.textContent = 'Room: ' + data.room + ' • You: ' + myName;
+    return;
+  }
+  if (data.type === 'presence') {
+    presence.textContent = 'In room: ' + (data.users || []).join(', ');
+    return;
+  }
+  if (data.type === 'chat') {
+    const who = data.from === myName ? 'me' : 'them';
+    write(who, data.text, data.ts);
+  }
+};
+ws.onclose = () => {
+  presence.textContent = 'Disconnected';
+};
 
-function disable(){ msgInput.disabled=true; sendBtn.disabled=true; fileBtn.disabled=true; }
-
-// Send text
 function send() {
   const text = msgInput.value.trim();
   if (!text) return;
-  ws && ws.send(JSON.stringify({ type:'chat', text }));
+  ws.send(JSON.stringify({ type:'chat', text }));
   msgInput.value = '';
 }
 sendBtn.onclick = send;
-msgInput.addEventListener('keydown', e => { if (e.key==='Enter' && !e.shiftKey){ e.preventDefault(); send(); } });
-
-// File send (chunked base64)
-fileBtn.onclick = () => fileInput.click();
-fileInput.onchange = async () => {
-  const f = fileInput.files[0];
-  if (!f) return;
-  if (f.size > MAX_FILE){ write('me', `<div class="card"><div class="name">File too big</div><div>Max 10 MB</div></div>`); fileInput.value=''; return; }
-
-  const fid = Math.random().toString(36).slice(2);
-  const card = document.createElement('div');
-  card.className = 'row me';
-  card.innerHTML = `<div class="card"><div class="name">📎 ${escape(f.name)} (${Math.round(f.size/1024)} KB)</div><div class="progress"><div class="bar" id="bar-${fid}"></div></div></div>`;
-  log.appendChild(card); log.scrollTop=log.scrollHeight;
-
-  ws && ws.send(JSON.stringify({ type:'file_meta', id:fid, name:f.name, size:f.size, mime:f.type||'application/octet-stream' }));
-
-  const chunkSize = 64 * 1024;
-  let offset = 0;
-  const reader = new FileReader();
-  reader.onload = () => {
-    const base64 = btoa(String.fromCharCode(...new Uint8Array(reader.result)));
-    ws && ws.send(JSON.stringify({ type:'file_chunk', id:fid, data: base64 }));
-    offset += reader.result.byteLength;
-    const bar = document.getElementById('bar-'+fid);
-    if (bar) bar.style.width = Math.round((offset / f.size) * 100) + '%';
-    pump();
-  };
-  reader.onerror = () => { ws && ws.send(JSON.stringify({type:'file_abort', id:fid })); };
-
-  function pump(){
-    if (offset >= f.size){ ws && ws.send(JSON.stringify({ type:'file_done', id:fid })); fileInput.value=''; return; }
-    const slice = f.slice(offset, offset+chunkSize);
-    reader.readAsArrayBuffer(slice);
-  }
-  pump();
-};
-
-// Receiving file
-const incoming = new Map();
-function handleIncomingFileMeta(d){
-  incoming.set(d.id, { name:d.name, mime:d.mime, size:d.size, received:0, parts:[] });
-  write('them', `<div class="card" id="rcv-${d.id}"><div class="name">Receiving: 📎 ${escape(d.name)} (${Math.round(d.size/1024)} KB)</div><div class="progress"><div class="bar" id="rcvbar-${d.id}"></div></div></div>`);
-}
-function handleIncomingFileChunk(d){
-  const it = incoming.get(d.id); if (!it) return;
-  const bin = Uint8Array.from(atob(d.data), c=>c.charCodeAt(0));
-  it.parts.push(bin); it.received += bin.byteLength;
-  const bar = document.getElementById('rcvbar-'+d.id);
-  if (bar && it.size) bar.style.width = Math.round((it.received / it.size) * 100) + '%';
-}
-function handleIncomingFileDone(d){
-  const it = incoming.get(d.id); if (!it) return;
-  const blob = new Blob(it.parts, { type: it.mime });
-  const url = URL.createObjectURL(blob);
-  const card = document.getElementById('rcv-'+d.id);
-  if (card) card.innerHTML = `<div class="name">📎 ${escape(it.name)}</div><a class="dl" href="${url}" download="${escape(it.name)}">Download</a>`;
-  incoming.delete(d.id);
-}
+msgInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+});
 </script>
 </body>
 </html>
