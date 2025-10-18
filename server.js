@@ -12,10 +12,10 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname  = path.dirname(__filename);
 
 const app = express();
-app.set('trust proxy', true);           // makes IP detection work behind proxies
+app.set('trust proxy', true);
 app.use(cors());
 app.use(express.json());
-app.use(express.static(__dirname));     // serves index.html and assets
+app.use(express.static(__dirname));
 
 // ---------- Dirs ----------
 const uploadDir = path.join(__dirname, 'uploads');
@@ -61,7 +61,8 @@ function sha256(s){ return crypto.createHash('sha256').update(s).digest('hex'); 
 // ---------- Multer (25 MB) ----------
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    const toVault = (req.body?.pw && String(req.body.pw).trim().length > 0);
+    // Save to vault if password-protected OR download disabled
+    const toVault = (req.body?.pw && String(req.body.pw).trim().length > 0) || String(req.body?.nodl||'0') === '1';
     cb(null, toVault ? vaultDir : uploadDir);
   },
   filename: (_req, file, cb) => {
@@ -82,14 +83,15 @@ const upload = multer({ storage, limits: { fileSize: 25 * 1024 * 1024 } });
  *   recalled:false,
  *   expiresAt?: number, timer?: Timeout,
  *   protected?: boolean, salt?: string, pwHash?: string,
- *   unlockedForIP?: string | null
+ *   unlockedForIP?: string | null,
+ *   nodownload?: boolean
  * }
  */
 const rooms = new Map(); // room -> Set(ws)
 const meta  = new Map(); // ws -> {room, ip, clientId}
 const reg   = new Map(); // id -> item
 
-// ---------- Static / API routes (register BEFORE catch-all) ----------
+// ---------- Static / API routes ----------
 
 // health
 app.get('/health', (_req, res) => res.json({ ok:true }));
@@ -104,16 +106,18 @@ app.get('/myfile/:id', (req, res) => {
   if (!item || item.type !== 'file' || !item.privatePath) return res.status(404).end();
   const ip = getClientIP(req);
   if (ip !== item.ownerIP) return res.status(403).send('Forbidden');
+  res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(item.file?.name || 'file')}"`);
   res.sendFile(path.resolve(item.privatePath));
 });
 
-// receiver-only after unlock
+// receiver-only after unlock or allowview (for nodownload)
 app.get('/recvfile/:id', (req, res) => {
   const id = String(req.params.id || '');
   const item = reg.get(id);
   if (!item || item.type !== 'file' || !item.privatePath) return res.status(404).end();
   const ip = getClientIP(req);
   if (ip !== item.unlockedForIP) return res.status(403).send('Forbidden');
+  res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(item.file?.name || 'file')}"`);
   res.sendFile(path.resolve(item.privatePath));
 });
 
@@ -124,19 +128,30 @@ app.get('/fileurl/:id', (req, res) => {
   if (!item || item.type !== 'file') return res.status(404).json({ ok:false, error:'Not found' });
   const ip = getClientIP(req);
 
+  // Owner can always view inline
   if (ip === item.ownerIP && item.privatePath) {
     return res.json({ ok:true, id, name:item.file.name, mime:item.file.mime, url:`/myfile/${id}` });
   }
-  if (!item.protected && !item.recalled && item.filePath) {
+
+  // Unprotected & downloadable: public URL until recalled
+  if (!item.protected && !item.recalled && !item.nodownload && item.filePath) {
     return res.json({ ok:true, id, name:item.file.name, mime:item.file.mime, url:`/uploads/${path.basename(item.filePath)}` });
   }
-  if (item.protected && item.unlockedForIP && ip === item.unlockedForIP && item.privatePath) {
+
+  // Unprotected but NO-DOWNLOAD: only after allowview sets unlockedForIP
+  if (!item.protected && item.nodownload && item.unlockedForIP && ip === item.unlockedForIP && item.privatePath && !item.recalled) {
     return res.json({ ok:true, id, name:item.file.name, mime:item.file.mime, url:`/recvfile/${id}` });
   }
+
+  // Protected: only after successful unlock
+  if (item.protected && item.unlockedForIP && ip === item.unlockedForIP && item.privatePath && !item.recalled) {
+    return res.json({ ok:true, id, name:item.file.name, mime:item.file.mime, url:`/recvfile/${id}` });
+  }
+
   return res.status(403).json({ ok:false, error:'Not accessible' });
 });
 
-// upload (ttl + optional password; expects clientId)
+// upload (ttl + optional password + optional nodownload; expects clientId)
 app.post('/upload/:room', upload.array('file', 5), (req, res) => {
   const room = (req.params.room || '').trim() || 'chat';
   const set = rooms.get(room);
@@ -148,21 +163,27 @@ app.post('/upload/:room', upload.array('file', 5), (req, res) => {
 
   const ttlSec = clamp(parseInt((req.body?.ttl ?? '0'), 10) || 0, 0, 31*24*3600);
   const pwRaw  = (req.body?.pw && String(req.body.pw).trim()) || '';
+  const nodl   = String(req.body?.nodl || '0') === '1';
 
   (req.files || []).forEach(f => {
     const id = uid();
     const ts = now();
+    const protectedFlag = !!pwRaw;
+    // Because of storage.destination, file is in vault if protected or nodl==true
+    const inVault = protectedFlag || nodl;
+
     const record = {
       id, room, type:'file', ownerIP, ownerId, ts,
       file: { name: f.originalname, savedAs: path.basename(f.filename || f.path), size: f.size, mime: f.mimetype },
-      filePath: pwRaw ? null : f.path,
-      privatePath: pwRaw ? f.path : null,
+      filePath: inVault ? null : f.path,
+      privatePath: inVault ? f.path : null,
       recalled:false,
-      protected: !!pwRaw,
+      protected: protectedFlag,
+      nodownload: nodl,
       salt:null, pwHash:null,
       unlockedForIP:null
     };
-    if (pwRaw) { record.salt = uid(); record.pwHash = sha256(record.salt + '|' + pwRaw); }
+    if (protectedFlag) { record.salt = uid(); record.pwHash = sha256(record.salt + '|' + pwRaw); }
     if (ttlSec > 0) { record.expiresAt = ts + ttlSec*1000; scheduleAutoRecall(record); }
     reg.set(id, record);
 
@@ -170,8 +191,9 @@ app.post('/upload/:room', upload.array('file', 5), (req, res) => {
       type:'file', id, fromId: ownerId, ts,
       file: {
         name: record.file.name, savedAs: record.file.savedAs, size: record.file.size, mime: record.file.mime,
-        url: pwRaw ? null : `/uploads/${path.basename(record.filePath)}`,
-        protected: !!pwRaw
+        url: (!protectedFlag && !nodl) ? `/uploads/${path.basename(f.path)}` : null,
+        protected: protectedFlag,
+        nodownload: nodl
       }
     };
     if (record.expiresAt) payload.expiresAt = record.expiresAt;
@@ -186,7 +208,7 @@ app.post('/upload/:room', upload.array('file', 5), (req, res) => {
   res.json({ ok:true });
 });
 
-// unlock
+// unlock (recalls on incorrect password — already in your original code)
 app.post('/unlock/:id', (req, res) => {
   const id = String(req.params.id || '');
   const pwd = (req.body?.password && String(req.body.password)) || '';
@@ -207,7 +229,21 @@ app.post('/unlock/:id', (req, res) => {
   return res.json({ ok:true });
 });
 
-// ---------- Catch-all (register LAST) ----------
+// allow inline view for NO-DOWNLOAD files (grants the viewer’s IP)
+app.post('/allowview/:id', (req, res) => {
+  const id = String(req.params.id || '');
+  const item = reg.get(id);
+  if (!item || item.type !== 'file' || !item.nodownload || item.protected || item.recalled) {
+    return res.status(400).json({ ok:false, error:'Invalid item' });
+  }
+  const ip = getClientIP(req);
+  // Owner cannot “allow” themselves; owner already has /myfile
+  if (ip === item.ownerIP) return res.json({ ok:true });
+  item.unlockedForIP = ip;
+  return res.json({ ok:true });
+});
+
+// ---------- Catch-all ----------
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'index.html'));
 });
