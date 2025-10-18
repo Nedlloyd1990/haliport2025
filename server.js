@@ -14,7 +14,7 @@ const __dirname  = path.dirname(__filename);
 const app = express();
 app.set('trust proxy', true);
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '2mb' }));
 app.use(express.static(__dirname));
 
 // ---------- Dirs ----------
@@ -38,10 +38,8 @@ function getClientIP(req) {
 }
 function getRoom(reqOrUrlString) {
   try {
-    // Works for both HTTP requests and raw URL strings from the WS upgrade
     const u = new URL(typeof reqOrUrlString === 'string' ? reqOrUrlString : (reqOrUrlString.url || ''), 'http://x');
     const q = (u.searchParams.get('room') || '').trim();
-    // fallback: take path segment (but we prefer ?room=)
     const p = u.pathname.replace(/^\/+|\/+$/g,'');
     return q || p || 'chat';
   } catch { return 'chat'; }
@@ -74,9 +72,47 @@ const upload = multer({ storage, limits: { fileSize: 25 * 1024 * 1024 } });
  *   unlockedForIP?: string | null
  * }
  */
-const rooms = new Map(); // room -> Set(ws)
-const meta  = new Map(); // ws -> {room, ip, clientId}
-const reg   = new Map(); // id -> item
+const roomsWS = new Map();  // room -> Set(ws)
+const metaWS  = new Map();  // ws -> {room, ip, clientId}
+const sseRooms = new Map(); // room -> Set(res)
+const reg   = new Map();    // id -> item
+
+// ---------- Small helpers ----------
+function broadcast(room, payload){
+  const s = JSON.stringify(payload);
+
+  // WS clients
+  const set = roomsWS.get(room);
+  if (set) { for (const ws of set) { try { ws.send(s); } catch {} } }
+
+  // SSE clients
+  const sseSet = sseRooms.get(room);
+  if (sseSet) {
+    for (const res of sseSet) {
+      try { res.write(`data: ${s}\n\n`); } catch {}
+    }
+  }
+}
+function sendTo(room, predicate, payload){
+  const s = JSON.stringify(payload);
+
+  // WS
+  const set = roomsWS.get(room);
+  if (set) {
+    for (const ws of set) {
+      const m = metaWS.get(ws);
+      if (m && predicate(m)) { try { ws.send(s); } catch {} }
+    }
+  }
+
+  // SSE: no identity per connection, so we can't filter here; we’ll broadcast and let client ignore if not relevant
+  const sseSet = sseRooms.get(room);
+  if (sseSet) {
+    for (const res of sseSet) {
+      try { res.write(`data: ${s}\n\n`); } catch {}
+    }
+  }
+}
 
 // ---------- Health ----------
 app.get('/health', (_req, res) => res.json({ ok:true }));
@@ -84,6 +120,7 @@ app.get('/health', (_req, res) => res.json({ ok:true }));
 // ---------- Static / API (before catch-all) ----------
 app.use('/uploads', express.static(uploadDir));
 
+// viewer helpers
 app.get('/myfile/:id', (req, res) => {
   const id = String(req.params.id || '');
   const item = reg.get(id);
@@ -120,12 +157,17 @@ app.get('/fileurl/:id', (req, res) => {
   return res.status(403).json({ ok:false, error:'Not accessible' });
 });
 
+// Upload (works whether WS or SSE is used on the client)
 app.post('/upload/:room', upload.array('file', 5), (req, res) => {
   const room = (req.params.room || '').trim() || 'chat';
-  const set = rooms.get(room);
-  if (!set || set.size === 0 || set.size > 2) {
-    return res.status(400).json({ ok:false, error:'Room not active or full' });
+
+  // allow if either WS or SSE has someone connected
+  const hasAudience = (roomsWS.get(room)?.size || 0) + (sseRooms.get(room)?.size || 0);
+  if (!hasAudience) {
+    // still allow owner to place file; but warn: we'll deliver when someone connects
+    // (to keep behavior simple, we'll proceed)
   }
+
   const ownerIP = getClientIP(req);
   const ownerId = (req.body?.clientId && String(req.body.clientId)) || null;
 
@@ -163,12 +205,14 @@ app.post('/upload/:room', upload.array('file', 5), (req, res) => {
 
     const ownerAug = { type:'file_owner', id };
     if (record.privatePath) ownerAug.ownerUrl = `/myfile/${id}`;
+    // owner-only message (best-effort on WS; SSE will also receive but owner checks on client)
     sendTo(room, (m) => m.clientId === ownerId, ownerAug);
   });
 
   res.json({ ok:true });
 });
 
+// Unlock
 app.post('/unlock/:id', (req, res) => {
   const id = String(req.params.id || '');
   const pwd = (req.body?.password && String(req.body.password)) || '';
@@ -185,8 +229,52 @@ app.post('/unlock/:id', (req, res) => {
     return res.status(403).json({ ok:false, error:'Incorrect password. File was recalled.' });
   }
   item.unlockedForIP = ip;
-  sendTo(item.room, (m) => m.ip === ip, { type:'file_unlocked', id, url:`/recvfile/${id}` });
+  broadcast(item.room, { type:'file_unlocked', id, url:`/recvfile/${id}` });
   return res.json({ ok:true });
+});
+
+// ---------- SSE endpoints (fallback receive channel) ----------
+app.get('/sse', (req, res) => {
+  const room = getRoom(req);
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders?.();
+
+  const set = sseRooms.get(room) || new Set();
+  sseRooms.set(room, set);
+  set.add(res);
+
+  // greet
+  res.write(`data: ${JSON.stringify({ type:'welcome', room, yourId:null, users: [] })}\n\n`);
+
+  req.on('close', () => {
+    set.delete(res);
+    if (set.size === 0) sseRooms.delete(room);
+  });
+});
+
+// POST /push — send chat/recall via HTTP (used when in SSE mode)
+app.post('/push', (req, res) => {
+  const { room, type } = req.body || {};
+  if (!room || !type) return res.status(400).json({ ok:false, error:'Missing room/type' });
+
+  if (type === 'chat') {
+    const { fromId, text } = req.body;
+    const id = uid(); const ts = now();
+    reg.set(id, { id, room, type:'chat', ownerIP:'sse', ownerId: fromId || null, ts, text: String(text||'').slice(0,4000), recalled:false });
+    broadcast(room, { type:'chat', id, fromId: fromId || null, text: String(text||''), ts });
+    return res.json({ ok:true });
+  }
+
+  if (type === 'recall') {
+    const { id } = req.body || {};
+    if (!id) return res.status(400).json({ ok:false, error:'Missing id' });
+    performRecall(String(id));
+    return res.json({ ok:true });
+  }
+
+  return res.status(400).json({ ok:false, error:'Unsupported type' });
 });
 
 // ---------- Catch-all (serve app) ----------
@@ -212,10 +300,10 @@ function performRecall(id){
   if (item.type === 'file') moveFileToVault(item);
   item.unlockedForIP = null;
 
-  sendTo(item.room, (m) => m.clientId !== item.ownerId, { type:'recalled', id, sys:'This item was recalled by the sender.' });
+  broadcast(item.room, { type:'recalled', id, sys:'This item was recalled by the sender.' });
   const ownerNote = { type:'recalled_owner', id, sys:'You recalled this. The other person can no longer see it.' };
   if (item.type === 'file' && item.privatePath) ownerNote.newUrl = `/myfile/${id}`;
-  sendTo(item.room, (m) => m.clientId === item.ownerId, ownerNote);
+  broadcast(item.room, ownerNote);
 }
 function scheduleAutoRecall(item){
   if (!item.expiresAt) return;
@@ -227,44 +315,29 @@ function scheduleAutoRecall(item){
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server, path: '/ws' });
 
-function broadcast(room, payload){
-  const set = rooms.get(room);
-  if (!set) return;
-  const s = JSON.stringify(payload);
-  for (const ws of set) { try { ws.send(s); } catch {} }
-}
-function sendTo(room, predicate, payload){
-  const set = rooms.get(room);
-  if (!set) return;
-  const s = JSON.stringify(payload);
-  for (const ws of set) {
-    const m = meta.get(ws);
-    if (m && predicate(m)) { try { ws.send(s); } catch {} }
-  }
-}
-
 wss.on('connection', (ws, req) => {
   const room = getRoom(req.url);
   const ip = getClientIP(req);
   const clientId = uid();
 
-  const set = rooms.get(room) || new Set();
+  const set = roomsWS.get(room) || new Set();
   if (set.size >= 2) {
     ws.send(JSON.stringify({ type:'room_full', message:'This private room already has two people.' }));
     ws.close(4001, 'room full');
     return;
   }
   set.add(ws);
-  rooms.set(room, set);
-  meta.set(ws, { room, ip, clientId });
+  roomsWS.set(room, set);
+  metaWS.set(ws, { room, ip, clientId });
 
   console.log(`[WS] connected room=${room} id=${clientId} ip=${ip} size=${set.size}`);
-  ws.send(JSON.stringify({ type:'welcome', room, yourId: clientId, users: [...set].map(sock => meta.get(sock)?.clientId) }));
-  broadcast(room, { type:'presence', users: [...set].map(sock => meta.get(sock)?.clientId) });
+  ws.send(JSON.stringify({ type:'welcome', room, yourId: clientId, users: [...set].map(sock => metaWS.get(sock)?.clientId) }));
+  const users = [...set].map(sock => metaWS.get(sock)?.clientId);
+  for (const sock of set) { try { sock.send(JSON.stringify({ type:'presence', users })); } catch {} }
 
   ws.on('message', (buf) => {
     let data; try { data = JSON.parse(buf); } catch { return; }
-    const m = meta.get(ws); if (!m) return;
+    const m = metaWS.get(ws); if (!m) return;
 
     if (data.type === 'chat') {
       const id = uid(); const ts = now();
@@ -281,12 +354,15 @@ wss.on('connection', (ws, req) => {
   });
 
   ws.on('close', () => {
-    meta.delete(ws);
-    const s = rooms.get(room);
+    metaWS.delete(ws);
+    const s = roomsWS.get(room);
     if (s) {
       s.delete(ws);
-      if (s.size === 0) rooms.delete(room);
-      else broadcast(room, { type:'presence', users: [...s].map(sock => meta.get(sock)?.clientId) });
+      if (s.size === 0) roomsWS.delete(room);
+      else {
+        const users = [...s].map(sock => metaWS.get(sock)?.clientId);
+        for (const sock of s) { try { sock.send(JSON.stringify({ type:'presence', users })); } catch {} }
+      }
     }
     console.log(`[WS] closed room=${room} id=${clientId}`);
   });
@@ -295,6 +371,6 @@ wss.on('connection', (ws, req) => {
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
   console.log('Listening on http://localhost:'+PORT);
-  console.log('Open two tabs like: http://localhost:'+PORT+'/my-room');
-  console.log('Sockets at /ws?room=<room>');
+  console.log('WebSocket:  ws://localhost:'+PORT+'/ws?room=<room>');
+  console.log('SSE (fallback): GET http://localhost:'+PORT+'/sse?room=<room>');
 });
