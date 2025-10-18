@@ -7,12 +7,10 @@
 <style>
   :root{
     --bg:#0b0f14; --panel:#121923; --panel2:#0f151e; --text:#e9f0f7; --muted:#9fb0c2; --accent:#57acff; --border:#1f2b3b;
-    --ring:#73b6ff; --danger:#ff6b6b; --glass:rgba(255,255,255,.06);
+    --glass:rgba(255,255,255,.06); --danger:#ff6b6b;
   }
-  *{box-sizing:border-box}
-  html,body{height:100%}
+  *{box-sizing:border-box} html,body{height:100%}
   body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Arial}
-
   .app{display:flex;flex-direction:column;min-height:100vh}
   .header{height:64px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;padding:12px 18px;background:var(--panel)}
   .scroll{flex:1;overflow:auto;padding:18px}
@@ -21,25 +19,22 @@
   .bubble{max-width:900px;width:fit-content;background:#172131;border:1px solid var(--border);padding:12px 14px;border-radius:16px;font-size:1.05rem;line-height:1.5;position:relative}
   .me .bubble{background:#0f2744;border-color:#133659}
   .meta{color:#9fb0c2;font-size:.85rem;margin-top:6px;text-align:right}
-
   .composer{position:sticky;bottom:0;display:flex;gap:12px;align-items:flex-end;border-top:1px solid var(--border);padding:14px 16px;background:var(--panel)}
   .textarea{flex:1;min-height:56px;max-height:220px;padding:14px;border-radius:14px;border:1px solid var(--border);background:var(--panel2);color:var(--text);resize:vertical;font-size:1.05rem;line-height:1.5;outline:none}
   .send{background:#1b87f3;border:0;color:#fff;padding:14px 22px;border-radius:14px;cursor:pointer;font-size:1rem}
   .iconbtn{border:1px solid var(--border);background:var(--panel2);color:var(--text);border-radius:12px;cursor:pointer;height:48px;width:48px;display:grid;place-items:center}
-
-  .filecard{display:flex;align-items:center;gap:10px; flex-wrap:wrap}
-  .filethumb{max-width:360px;border-radius:12px;display:block}
+  .filecard{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
   .filename{word-break:break-all}
-  .btn-min{display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border-radius:10px;border:1px solid var(--border);background:var(--glass);cursor:pointer;color:#e7edf4}
+  .btn-min{display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border-radius:10px;border:1px solid var(--border);background:var(--glass);cursor:pointer;color:#e7edf4;text-decoration:none}
   .btn-min:hover{background:rgba(255,255,255,.12)}
-  .tip{color:#9fb0c2;font-size:.9rem;margin:0 18px 8px}
-
-  /* system note */
+  .badge{ display:inline-flex; align-items:center; gap:6px; padding:3px 10px; border-radius:999px; font-size:.78rem;
+          background:#10263e; color:#b8d5ff; border:1px solid #1c3a5e }
+  .tomb { font-style:italic; color:#d2dcea }
+  .expiry{ color:var(--danger); font-size:.85rem; margin-top:6px }
   .sys{ color:#b7c6d8; font-size:.86rem; margin-top:6px; }
   .row.me .sys{ text-align:right; }
-  .row:not(.me) .sys{ text-align:left; }
 
-  /* three-dot (kebab) */
+  /* kebab */
   .kebab{
     position:absolute; top:6px; right:6px; width:32px; height:32px; display:grid; place-items:center;
     font-size:18px; background:var(--glass); border:1px solid rgba(255,255,255,.18);
@@ -48,8 +43,6 @@
     box-shadow:0 2px 10px rgba(0,0,0,.25);
   }
   .bubble:hover .kebab{ opacity:1; transform:translateY(-1px); box-shadow:0 6px 20px rgba(0,0,0,.3); }
-  .kebab:hover{ background:rgba(255,255,255,.12); }
-
   .menu{
     position:absolute; top:42px; right:6px; background:#0e1622; border:1px solid var(--border);
     border-radius:12px; box-shadow:0 12px 30px rgba(0,0,0,.4); display:none; min-width:170px; z-index:5;
@@ -58,38 +51,7 @@
   .menu button{ width:100%; text-align:left; padding:10px 12px; background:transparent; border:0; color:#e7edf4; cursor:pointer; font-size:.95rem }
   .menu button:hover{ background:#141c28 }
 
-  .tomb { font-style:italic; color:#d2dcea }
-  .expiry{ color:#ff6b6b; font-size:.85rem; margin-top:6px }
-  .badge{ display:inline-flex; align-items:center; gap:6px; padding:3px 10px; border-radius:999px; font-size:.78rem;
-          background:#10263e; color:#b8d5ff; border:1px solid #1c3a5e }
-
-  /* ===== Attachment Sheet (unchanged look from last step) ===== */
-  .overlay{ position:fixed; inset:0; background:rgba(0,0,0,.45); display:none; z-index:40; }
-  .overlay.open{ display:block; }
-  .sheet{ position:fixed; left:50%; top:50%; transform:translate(-50%,-50%); width:min(680px, 94vw);
-          background:#0f1622; border:1px solid var(--border); border-radius:20px;
-          box-shadow:0 30px 100px rgba(0,0,0,.65); padding:18px; display:none; z-index:41; }
-  .sheet.open{ display:block; }
-  .sheet h3{ margin:8px 0 14px; font-weight:700; letter-spacing:.2px }
-  .choices{ display:grid; grid-template-columns:1fr 1fr; gap:12px; margin:12px 0 6px }
-  .choice{ background:linear-gradient(180deg,#0f1927,#0d131d); border:1px solid var(--border);
-           border-radius:16px; padding:16px; cursor:pointer; display:flex; flex-direction:column; gap:8px;
-           transition:transform .12s ease, box-shadow .12s ease, border-color .12s ease; }
-  .choice:hover{ transform:translateY(-2px); box-shadow:0 12px 30px rgba(0,0,0,.4); border-color:#27405e }
-  .choice .title{ font-weight:600 }
-  .choice .desc{ color:#a9bdd2; font-size:.9rem }
-  .divider{ height:1px; background:var(--border); margin:12px 0 }
-  .panel{ display:none; gap:10px; align-items:center; flex-wrap:wrap; }
-  .panel.active{ display:flex }
-  .select{ background:#101725; color:#e7edf4; border:1px solid var(--border); border-radius:12px; padding:8px 10px; }
-  .input{ background:#101725; color:#e7edf4; border:1px solid var(--border); border-radius:12px; padding:9px 12px; }
-  .actions{ display:flex; gap:10px; justify-content:flex-end; margin-top:14px }
-  .btn{ border:1px solid var(--border); background:#1b87f3; color:#fff; padding:10px 14px; border-radius:12px; cursor:pointer; font-weight:600; }
-  .btn.secondary{ background:#0f151e; color:#e7edf4 }
-  .ghost{ background:transparent; border:0; color:#a9bdd2; cursor:pointer; }
-  .ghost:hover{ color:#d5e6ff; text-decoration:underline }
-
-  /* ===== Viewer Lightbox ===== */
+  /* viewer */
   .viewer-overlay{ position:fixed; inset:0; background:rgba(0,0,0,.6); display:none; z-index:60; }
   .viewer-overlay.open{ display:block; }
   .viewer{ position:fixed; left:50%; top:50%; transform:translate(-50%,-50%);
@@ -128,40 +90,7 @@
   </div>
 </div>
 
-<!-- Attachment sheet from previous step (unchanged structure) -->
-<div id="overlay" class="overlay"></div>
-<div id="sheet" class="sheet" role="dialog" aria-modal="true" aria-labelledby="attTitle">
-  <h3 id="attTitle">Attachment Options</h3>
-  <div id="choices" class="choices">
-    <div id="chooseTTL" class="choice">
-      <div class="title">Recall After</div>
-      <div class="desc">Auto-recall the file after a set time. Both sides see a red countdown.</div>
-    </div>
-    <div id="choosePW" class="choice">
-      <div class="title">Recall with Password</div>
-      <div class="desc">Receiver must enter a password to view. One wrong attempt will recall the file.</div>
-    </div>
-  </div>
-  <div class="divider"></div>
-  <div id="panelTTL" class="panel" aria-hidden="true">
-    <span style="min-width:110px;color:#cfe1f7">Recall after</span>
-    <select id="ttlDays" class="select"></select><span>days</span>
-    <select id="ttlHours" class="select"></select><span>hours</span>
-    <select id="ttlMinutes" class="select"></select><span>minutes</span>
-    <select id="ttlSeconds" class="select"></select><span>seconds</span>
-  </div>
-  <div id="panelPW" class="panel" aria-hidden="true">
-    <span style="min-width:110px;color:#cfe1f7">Enter password</span>
-    <input id="pwInput" class="input" type="password" placeholder="Enter password" minlength="1" />
-  </div>
-  <div class="actions">
-    <button id="backChoice" class="ghost" style="margin-right:auto; display:none">← Back</button>
-    <button id="sendFiles" class="btn">Send files</button>
-    <button id="cancelAttach" class="btn secondary">Cancel</button>
-  </div>
-</div>
-
-<!-- ===== Inline Viewer ===== -->
+<!-- Inline Viewer -->
 <div id="viewerOverlay" class="viewer-overlay"></div>
 <div id="viewer" class="viewer" role="dialog" aria-modal="true" aria-labelledby="viewerTitle">
   <div class="viewer-header">
@@ -180,7 +109,8 @@ const sendBtn = document.getElementById('send');
 const attachBtn = document.getElementById('attach');
 const fileInput = document.getElementById('fileInput');
 
-let myName = '', myRoom = roomFromPath();
+let myId = null;
+let myRoom = roomFromPath();
 
 // ===== Helpers =====
 function roomFromPath(){ const p = location.pathname.replace(/^\/+|\/+$/g,''); return p || 'chat'; }
@@ -200,7 +130,7 @@ function appendSystemLine(rowEl, text){
   const sys = document.createElement('div'); sys.className = 'sys'; sys.textContent = text; bubble.appendChild(sys);
 }
 
-// ===== Rendering =====
+// ===== Renderers =====
 function writeText(kind, id, text, ts=Date.now()){
   const row = document.createElement('div');
   row.className = 'row ' + (kind==='me' ? 'me' : '');
@@ -214,41 +144,33 @@ function writeText(kind, id, text, ts=Date.now()){
   log.appendChild(row); log.scrollTop = log.scrollHeight;
 }
 
-function fileControlsHTML(id, file, hasUrl){
+// file controls: we DO NOT auto-render file content; only name + buttons
+function fileControlsHTML(id, file, hasUrl, isProtected){
   const viewBtn = hasUrl ? `<button class="btn-min view-btn" data-id="${id}" data-name="${esc(file.name)}" data-mime="${file.mime || ''}" title="View in app">👁️ View</button>` : '';
-  const download = hasUrl && !file.protected ? `<a class="btn-min" href="${file.url}" download title="Download">⬇️ Download</a>` : '';
-  // For protected: sender/owner still has a link via ownerUrl later; receiver gets link after unlock.
+  // keep download button for unprotected files; protected files: download becomes available only after unlock (then /recvfile works)
+  const download = hasUrl && !isProtected ? `<a class="btn-min" href="${file.url}" download title="Download">⬇️ Download</a>` : '';
   return `<div class="file-commands" style="display:flex; gap:8px">${viewBtn}${download}</div>`;
 }
 
 function writeFile(kind, id, file, ts=Date.now(), expiresAt=null){
   const row = document.createElement('div'); row.className = 'row ' + (kind==='me' ? 'me' : ''); row.dataset.id = id;
 
-  let main;
-  if (file.protected && !file.url) {
-    main = `<div class="filecard">
-              <span class="filename">${esc(file.name)}</span>
-              <span style="color:#9fb0c2">(${humanSize(file.size)})</span>
-              <span class="badge">🔒 Password</span>
-            </div>
-            ${fileControlsHTML(id, file, false)}`;
-  } else {
-    const isImg = /^image\//.test(file.mime || '');
-    const preview = isImg ? `<img class="filethumb" src="${file.url}" alt="${esc(file.name)}" />`
-                          : `<span class="filename">${esc(file.name)}</span> <span style="color:#9fb0c2">(${humanSize(file.size)})</span>`;
-    main = `<div class="filecard">${preview}</div>${fileControlsHTML(id, file, true)}`;
-  }
+  // Always show filename only initially (no <img>, no <embed>)
+  const line = `<span class="filename">${esc(file.name)}</span> <span style="color:#9fb0c2">(${humanSize(file.size)})</span>`;
+  const badge = file.protected ? `<span class="badge">🔒 Password</span>` : '';
+  const commands = fileControlsHTML(id, file, !!file.url, !!file.protected);
 
   row.innerHTML = `
     <div class="bubble">
       ${bubbleMenu(id, kind==='me')}
-      ${main}
+      <div class="filecard">${line}${badge}</div>
+      ${commands}
       ${expiresAt ? `<div class="expiry" data-expires="${expiresAt}" data-id="${id}">⏱ calculating…</div>` : ''}
       <div class="meta">${new Date(ts).toLocaleString()}</div>
     </div>`;
   log.appendChild(row);
 
-  // Inline unlock for receiver if protected & no url yet
+  // Inline unlock for receiver if protected & not unlocked yet
   if (file.protected && !file.url && kind !== 'me') {
     const bubble = row.querySelector('.bubble');
     const wrap = document.createElement('div');
@@ -271,70 +193,103 @@ function recallForReceiver(id, sysText){
 }
 function markOwnerRecalled(id, sysText, newUrl){
   const row = log.querySelector(`.row[data-id="${CSS.escape(id)}"]`); if (!row) return;
-  if (newUrl) {
-    // Update any filename link or future views use /fileurl endpoint anyway
-    const a = row.querySelector('.filename[href]'); if (a) a.href = newUrl;
-    const img = row.querySelector('.filethumb'); if (img) img.src = newUrl;
-  }
+  // we keep content; countdown removed
   row.querySelector('.expiry')?.remove();
   appendSystemLine(row, sysText || 'You recalled this. The other person can no longer see it.');
   setTimeout(()=> row.scrollIntoView({behavior:'smooth', block:'nearest'}), 0);
 }
 function setOwnerUrl(id, ownerUrl){
-  const row = log.querySelector(`.row[data-id="${CSS.escape(id)}"]`); if (!row) return;
-  // Add/enable view & download buttons now that owner has a URL
+  // Owner can view via fileurl anyway; we don't auto-inject preview
+  const row = log.querySelector(`.row[data-id="${CSS.escape(id)}"]`);
+  if (!row) return;
+  // If there is a commands bar without view button (protected owner before aug), add a view button now
   const commands = row.querySelector('.file-commands');
   if (commands && !commands.querySelector('.view-btn')) {
     const name = row.querySelector('.filename')?.textContent || 'file';
     const btn = document.createElement('button');
     btn.className = 'btn-min view-btn';
-    btn.dataset.id = id; btn.dataset.name = name; // mime will be fetched on /fileurl
+    btn.dataset.id = id; btn.dataset.name = name;
     btn.textContent = '👁️ View';
     commands.prepend(btn);
   }
 }
 
-// ===== Countdown =====
-function fmtRemaining(ms){ if (ms<=0) return 'recalling…'; const s=Math.floor(ms/1000); const d=Math.floor(s/86400); const h=Math.floor((s%86400)/3600); const m=Math.floor((s%3600)/60); const ss=s%60; const parts=[]; if(d)parts.push(d+'d'); if(h||d)parts.push(h+'h'); if(m||h||d)parts.push(m+'m'); parts.push(ss+'s'); return '⏱ '+parts.join(' '); }
+// Countdown
+function fmtRemaining(ms){ if (ms<=0) return 'recalling…'; const s=Math.floor(ms/1000); const d=Math.floor(s/86400); const h=Math.floor((s%86400)/3600); const m=Math.floor((s%3600)/60); const ss=s%60; const p=[]; if(d)p.push(d+'d'); if(h||d)p.push(h+'h'); if(m||h||d)p.push(m+'m'); p.push(ss+'s'); return '⏱ '+p.join(' '); }
 function tickCountdowns(){ const n=Date.now(); document.querySelectorAll('.expiry').forEach(el=>{ const exp=parseInt(el.getAttribute('data-expires')||'0',10); el.textContent = fmtRemaining(exp-n); }); }
 setInterval(tickCountdowns,1000);
+
+// ===== Viewer =====
+const viewerOverlay = document.getElementById('viewerOverlay');
+const viewer        = document.getElementById('viewer');
+const viewerBody    = document.getElementById('viewerBody');
+const viewerTitle   = document.getElementById('viewerTitle');
+const viewerClose   = document.getElementById('viewerClose');
+
+function openViewer(){ viewerOverlay.classList.add('open'); viewer.classList.add('open'); }
+function closeViewer(){ viewerOverlay.classList.remove('open'); viewer.classList.remove('open'); viewerBody.innerHTML=''; viewerTitle.textContent='Preview'; }
+viewerOverlay.addEventListener('click', closeViewer);
+viewerClose.addEventListener('click', closeViewer);
 
 // ===== WebSocket =====
 const ws = new WebSocket(wsURL());
 ws.onopen = () => { title.textContent = 'Room: ' + myRoom; };
 ws.onmessage = (ev) => {
   const d = JSON.parse(ev.data);
-  if (d.type === 'room_full') { writeText('them','_','Room is full. Create a new path, e.g., /chat-1234'); msgInput.disabled=sendBtn.disabled=attachBtn.disabled=fileInput.disabled=true; presence.textContent='Room full'; return; }
-  if (d.type === 'welcome') { myName = d.yourName; presence.textContent = 'In room: ' + (d.users||[]).join(', '); title.textContent = 'Room: ' + d.room + ' • You: ' + myName; return; }
-  if (d.type === 'presence') { presence.textContent = 'In room: ' + (d.users||[]).join(', '); return; }
-  if (d.type === 'chat') { const who = d.from===myName?'me':'them'; writeText(who, d.id, d.text, d.ts); return; }
-  if (d.type === 'file') { const who = d.from===myName?'me':'them'; writeFile(who, d.id, d.file, d.ts, d.expiresAt||null); return; }
-  if (d.type === 'file_owner') { if (d.ownerUrl) setOwnerUrl(d.id, d.ownerUrl); return; }
-  if (d.type === 'file_unlocked') {
-    const row = log.querySelector(`.row[data-id="${CSS.escape(d.id)}"]`); if (!row) return;
-    const bubble = row.querySelector('.bubble');
-    // Enable a simple link for downloads, but view-button uses /fileurl for correct URL
-    const nameEl = bubble.querySelector('.filename');
-    if (nameEl && nameEl.tagName !== 'A') {
-      const name = nameEl.textContent || 'file';
-      const sizeNote = nameEl.nextElementSibling?.outerHTML || '';
-      nameEl.outerHTML = `<a class="filename" href="${d.url}" download>${esc(name)}</a>${sizeNote}`;
-    }
-    bubble.querySelector('.pwfield')?.remove();
-    bubble.querySelector('.btnUnlock')?.remove();
 
-    // Add a view button now that there is an accessible URL for receiver
-    const commands = row.querySelector('.file-commands');
-    if (commands && !commands.querySelector('.view-btn')) {
-      const name = row.querySelector('.filename')?.textContent || 'file';
-      const btn = document.createElement('button');
-      btn.className = 'btn-min view-btn';
-      btn.dataset.id = d.id; btn.dataset.name = name;
-      btn.textContent = '👁️ View';
-      commands.prepend(btn);
+  if (d.type === 'room_full') {
+    writeText('them','_','Room is full. Create a new path, e.g., /chat-1234');
+    msgInput.disabled=sendBtn.disabled=attachBtn.disabled=fileInput.disabled=true;
+    presence.textContent='Room full'; return;
+  }
+
+  if (d.type === 'welcome') {
+    myId = d.yourId; // IMPORTANT: identity
+    presence.textContent = 'In room: ' + (d.users || []).length + ' user(s)';
+    title.textContent = 'Room: ' + myRoom + ' • You: ' + myId;
+    return;
+  }
+
+  if (d.type === 'presence') {
+    presence.textContent = 'In room: ' + (d.users || []).length + ' user(s)';
+    return;
+  }
+
+  if (d.type === 'chat') {
+    const who = d.fromId === myId ? 'me' : 'them';
+    writeText(who, d.id, d.text, d.ts); return;
+  }
+
+  if (d.type === 'file') {
+    const who = d.fromId === myId ? 'me' : 'them';
+    writeFile(who, d.id, d.file, d.ts, d.expiresAt || null); return;
+  }
+
+  if (d.type === 'file_owner') {
+    if (d.ownerUrl) setOwnerUrl(d.id, d.ownerUrl); return;
+  }
+
+  if (d.type === 'file_unlocked') {
+    // receiver gets usable url after correct password; we still do NOT auto preview
+    const row = log.querySelector(`.row[data-id="${CSS.escape(d.id)}"]`);
+    if (row) {
+      // add view button if missing
+      const commands = row.querySelector('.file-commands');
+      if (commands && !commands.querySelector('.view-btn')) {
+        const name = row.querySelector('.filename')?.textContent || 'file';
+        const btn = document.createElement('button');
+        btn.className = 'btn-min view-btn';
+        btn.dataset.id = d.id; btn.dataset.name = name;
+        btn.textContent = '👁️ View';
+        commands.prepend(btn);
+      }
+      // remove unlock controls
+      row.querySelector('.pwfield')?.remove();
+      row.querySelector('.btnUnlock')?.remove();
     }
     return;
   }
+
   if (d.type === 'recalled') { recallForReceiver(d.id, d.sys); return; }
   if (d.type === 'recalled_owner') { markOwnerRecalled(d.id, d.sys, d.newUrl); return; }
   if (d.type === 'error') { writeText('them','_','⚠️ '+(d.message||'Error')); return; }
@@ -347,51 +302,13 @@ function recall(id){ ws.send(JSON.stringify({ type:'recall', id })); }
 sendBtn.onclick = send;
 msgInput.addEventListener('keydown', (e)=>{ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); send(); }});
 
-// ===== Attachment Sheet Logic (from previous step) =====
-const overlay = document.getElementById('overlay');
-const sheet   = document.getElementById('sheet');
-const choices = document.getElementById('choices');
-const panelTTL= document.getElementById('panelTTL');
-const panelPW = document.getElementById('panelPW');
-const backBtn = document.getElementById('backChoice');
-const sendFilesBtn = document.getElementById('sendFiles');
-const cancelAttach = document.getElementById('cancelAttach');
-const chooseTTL = document.getElementById('chooseTTL');
-const choosePW  = document.getElementById('choosePW');
-const selD = document.getElementById('ttlDays');
-const selH = document.getElementById('ttlHours');
-const selM = document.getElementById('ttlMinutes');
-const selS = document.getElementById('ttlSeconds');
-const pwInputSheet = document.getElementById('pwInput');
-
-let pendingFiles = null;
-let mode = null; // 'ttl' | 'pw'
-
-function fillSelect(sel, max){ sel.innerHTML=''; for(let i=0;i<=max;i++){ const o=document.createElement('option'); o.value=i; o.textContent=String(i).padStart(2,'0'); sel.appendChild(o);} }
-fillSelect(selD, 30); fillSelect(selH, 23); fillSelect(selM, 59); fillSelect(selS, 59);
-
-function openSheet(){ overlay.classList.add('open'); sheet.classList.add('open'); showChoices(); }
-function closeSheet(){ overlay.classList.remove('open'); sheet.classList.remove('open'); pendingFiles=null; mode=null; }
-function showChoices(){ choices.style.display='grid'; panelTTL.classList.remove('active'); panelPW.classList.remove('active'); panelTTL.setAttribute('aria-hidden','true'); panelPW.setAttribute('aria-hidden','true'); backBtn.style.display='none'; }
-function showTTL(){ choices.style.display='none'; panelTTL.classList.add('active'); panelPW.classList.remove('active'); panelTTL.setAttribute('aria-hidden','false'); panelPW.setAttribute('aria-hidden','true'); backBtn.style.display='inline'; selD.value='0'; selH.value='0'; selM.value='0'; selS.value='0'; mode='ttl'; }
-function showPW(){ choices.style.display='none'; panelPW.classList.add('active'); panelTTL.classList.remove('active'); panelPW.setAttribute('aria-hidden','false'); panelTTL.setAttribute('aria-hidden','true'); backBtn.style.display='inline'; pwInputSheet.value=''; pwInputSheet.focus(); mode='pw'; }
-
-attachBtn.addEventListener('click', ()=> fileInput.click());
-fileInput.addEventListener('change', (e)=>{
-  const files = Array.from(e.target.files||[]);
-  if (!files.length) return;
-  pendingFiles = files; openSheet();
-});
-overlay.addEventListener('click', closeSheet);
-cancelAttach.addEventListener('click', closeSheet);
-backBtn.addEventListener('click', showChoices);
-chooseTTL.addEventListener('click', showTTL);
-choosePW.addEventListener('click', showPW);
-
+// ===== Upload (send myId so server can tag fromId on file events) =====
 async function uploadFiles(files, ttlSeconds, password){
-  const form = new FormData(); for(const f of files) form.append('file', f);
+  const form = new FormData();
+  for (const f of files) form.append('file', f);
   if (ttlSeconds && ttlSeconds>0) form.append('ttl', String(ttlSeconds));
   if (password && password.length>0) form.append('pw', password);
+  if (myId) form.append('clientId', myId);
   try{
     const res = await fetch(`/upload/${encodeURIComponent(myRoom)}`, { method:'POST', body: form });
     if (!res.ok) { const j = await res.json().catch(()=>({})); throw new Error(j.error || ('Upload failed: '+res.status)); }
@@ -399,16 +316,16 @@ async function uploadFiles(files, ttlSeconds, password){
   finally{ fileInput.value=''; }
 }
 
-sendFilesBtn.addEventListener('click', async ()=>{
-  if (!pendingFiles) return closeSheet();
-  let ttlSeconds=0, password='';
-  if (mode==='ttl'){ const d=+selD.value||0, h=+selH.value||0, m=+selM.value||0, s=+selS.value||0; ttlSeconds = d*86400 + h*3600 + m*60 + s; }
-  if (mode==='pw'){ password = pwInputSheet.value.trim(); if (!password){ alert('Please enter a password.'); return; } }
-  await uploadFiles(pendingFiles, ttlSeconds, password);
-  closeSheet();
+// Basic attach (no sheet here to keep this patch focused)
+attachBtn.addEventListener('click', ()=> fileInput.click());
+fileInput.addEventListener('change', async (e) => {
+  const files = Array.from(e.target.files || []);
+  if (!files.length) return;
+  // send with no TTL / no password by default (your existing sheet can call uploadFiles with options)
+  await uploadFiles(files, 0, '');
 });
 
-// ===== Unlock (receiver) =====
+// Unlock (receiver)
 log.addEventListener('click', async (e) => {
   const btn = e.target.closest('.btnUnlock'); if (!btn) return;
   const id = btn.dataset.id;
@@ -420,12 +337,12 @@ log.addEventListener('click', async (e) => {
     });
     if (!res.ok) {
       const j = await res.json().catch(()=>({}));
-      console.warn(j.error || 'Unlock failed'); // server will recall on wrong password
+      console.warn(j.error || 'Unlock failed'); // server recalls on wrong password
     }
   }catch(err){ console.warn(err); }
 });
 
-// ===== Context menus (recall) =====
+// Menus
 log.addEventListener('click', (e) => {
   const btn = e.target.closest('button'); if (!btn) return;
   const action = btn.dataset.action; const id = btn.dataset.id;
@@ -440,70 +357,49 @@ log.addEventListener('click', (e) => {
   }
 });
 document.addEventListener('click', (e) => {
-  const inside = e.target.closest('.menu, .kebab, .sheet, .viewer'); if (!inside) document.querySelectorAll('.menu.open').forEach(m => m.classList.remove('open'));
+  const inside = e.target.closest('.menu, .kebab, .viewer'); if (!inside) document.querySelectorAll('.menu.open').forEach(m => m.classList.remove('open'));
 });
 
-// ===== Inline Viewer =====
+// View button -> ask server for correct URL (owner vs receiver); then preview inline
 const viewerOverlay = document.getElementById('viewerOverlay');
 const viewer        = document.getElementById('viewer');
 const viewerBody    = document.getElementById('viewerBody');
 const viewerTitle   = document.getElementById('viewerTitle');
 const viewerClose   = document.getElementById('viewerClose');
-
 function openViewer(){ viewerOverlay.classList.add('open'); viewer.classList.add('open'); }
 function closeViewer(){ viewerOverlay.classList.remove('open'); viewer.classList.remove('open'); viewerBody.innerHTML=''; viewerTitle.textContent='Preview'; }
 viewerOverlay.addEventListener('click', closeViewer);
 viewerClose.addEventListener('click', closeViewer);
 
-// Click handler for the 👁️ View button
 log.addEventListener('click', async (e) => {
   const vb = e.target.closest('.view-btn'); if (!vb) return;
   const id = vb.dataset.id;
-  // Ask server which URL we are allowed to view, + mime
   let info;
   try{
     const res = await fetch(`/fileurl/${encodeURIComponent(id)}`);
     info = await res.json();
     if (!res.ok || !info?.ok) throw new Error(info?.error || 'Not accessible');
   }catch(err){
-    // Not accessible (likely protected and not unlocked yet or recalled for receiver)
-    // We silently ignore or show a tiny message:
     console.warn(err.message || err);
     return;
   }
-
   const { url, mime, name } = info;
   viewerTitle.textContent = name || 'Preview';
-
-  // Render
   viewerBody.innerHTML = '';
-  if (isImage(mime)) {
-    const img = document.createElement('img');
-    img.src = url; img.alt = name || 'image';
-    viewerBody.appendChild(img);
-  } else if (isPDF(mime)) {
-    const embed = document.createElement('embed');
-    embed.type = 'application/pdf';
-    embed.src = url + '#toolbar=1&navpanes=0&statusbar=0';
-    viewerBody.appendChild(embed);
-  } else if (likelyEmbeddable(mime)) {
-    const iframe = document.createElement('iframe');
-    iframe.src = url; iframe.setAttribute('sandbox','allow-scripts allow-same-origin'); // safe-ish
-    viewerBody.appendChild(iframe);
+
+  if (/^image\//i.test(mime)) {
+    const img = document.createElement('img'); img.src = url; img.alt = name || 'image'; viewerBody.appendChild(img);
+  } else if (/^application\/pdf$/i.test(mime)) {
+    const embed = document.createElement('embed'); embed.type = 'application/pdf'; embed.src = url + '#toolbar=1&navpanes=0&statusbar=0'; viewerBody.appendChild(embed);
+  } else if (/^text\//i.test(mime)) {
+    const iframe = document.createElement('iframe'); iframe.src = url; iframe.setAttribute('sandbox','allow-scripts allow-same-origin'); viewerBody.appendChild(iframe);
   } else {
-    const fb = document.createElement('div');
-    fb.className = 'viewer-fallback';
-    fb.innerHTML = `Preview not supported for <code>${mime || 'this file type'}</code>.<br/>You can still download it from the message bubble.`;
+    const fb = document.createElement('div'); fb.className = 'viewer-fallback';
+    fb.innerHTML = `Preview not supported for <code>${mime || 'this file type'}</code>.<br/>You can still download it from the message bubble (if available).`;
     viewerBody.appendChild(fb);
   }
-
   openViewer();
 });
-
-// ===== Init send/receive =====
-function writeInit(){ /* noop */ }
-
-// ===== WebSocket setup end =====
 </script>
 </body>
 </html>
