@@ -5,7 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>🍁 Haliport — Private 1:1 Chat</title>
 <style>
-  /* (styles unchanged from your last working version) */
   :root{ --bg:#0b0f14; --panel:#121923; --panel2:#0f151e; --text:#e9f0f7; --muted:#9fb0c2; --accent:#57acff; --border:#1f2b3b; --glass:rgba(255,255,255,.06); --danger:#ff6b6b; }
   *{box-sizing:border-box} html,body{height:100%}
   body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Arial}
@@ -21,6 +20,7 @@
   .textarea{flex:1;min-height:56px;max-height:220px;padding:14px;border-radius:14px;border:1px solid var(--border);background:var(--panel2);color:var(--text);resize:vertical;font-size:1.05rem;line-height:1.5;outline:none}
   .send{background:#1b87f3;border:0;color:#fff;padding:14px 22px;border-radius:14px;cursor:pointer;font-size:1rem}
   .iconbtn{border:1px solid var(--border);background:var(--panel2);color:var(--text);border-radius:12px;cursor:pointer;height:48px;width:48px;display:grid;place-items:center}
+
   .filecard{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
   .filename{word-break:break-all}
   .btn-min{display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border-radius:10px;border:1px solid var(--border);background:var(--glass);cursor:pointer;color:#e7edf4;text-decoration:none}
@@ -38,6 +38,7 @@
   .menu.open{ display:block }
   .menu button{ width:100%; text-align:left; padding:10px 12px; background:transparent; border:0; color:#e7edf4; cursor:pointer; font-size:.95rem }
 
+  /* Attachment sheet */
   .overlay{ position:fixed; inset:0; background:rgba(0,0,0,.45); display:none; z-index:40; }
   .overlay.open{ display:block; }
   .sheet{ position:fixed; left:50%; top:50%; transform:translate(-50%,-50%); width:min(680px, 94vw);
@@ -118,117 +119,123 @@ const sendBtn = document.getElementById('send');
 const attachBtn = document.getElementById('attach');
 const fileInput = document.getElementById('fileInput');
 
-const room = (location.pathname.replace(/^\/+|\/+$/g,'') || 'chat'); // UI room label
+const room = (location.pathname.replace(/^\/+|\/+$/g,'') || 'chat');
 let myId = null;
+let transport = 'ws'; // 'ws' | 'sse'
+let ws = null, sse = null, retries = 0;
 
-// ---- WS helper (connect to /ws?room=...) ----
-function wsURL(){
-  const proto = location.protocol === 'https:' ? 'wss://' : 'ws://';
-  const base  = proto + location.host + '/ws';
-  const q = '?room=' + encodeURIComponent(room);
-  return base + q;
-}
+// UI helpers
 function esc(s){ return String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&gt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]); }
 function humanSize(b){ const u=['B','KB','MB','GB']; let v=b,i=0; while(v>=1024&&i<u.length-1){v/=1024;i++;} return v.toFixed(v>=10||i===0?0:1)+' '+u[i]; }
+function row(kind,id,inner){ const r=document.createElement('div'); r.className='row ' + (kind==='me'?'me':''); r.dataset.id=id; r.innerHTML=inner; log.appendChild(r); log.scrollTop=log.scrollHeight; return r; }
 function bubbleMenu(id, mine){ return `<button class="kebab" data-action="open-menu" data-id="${id}" ${mine?'':'style="display:none"'}>⋯</button><div class="menu" data-menu-for="${id}"><button data-action="recall" data-id="${id}">Recall</button></div>`; }
-
-function writeText(kind, id, text, ts=Date.now()){
-  const row = document.createElement('div');
-  row.className = 'row ' + (kind==='me' ? 'me' : '');
-  row.dataset.id = id;
-  row.innerHTML = `<div class="bubble">${bubbleMenu(id, kind==='me')}<div>${esc(text)}</div><div class="meta">${new Date(ts).toLocaleString()}</div></div>`;
-  log.appendChild(row); log.scrollTop = log.scrollHeight;
-}
+function writeText(kind, id, text, ts=Date.now()){ row(kind,id,`<div class="bubble">${bubbleMenu(id, kind==='me')}<div>${esc(text)}</div><div class="meta">${new Date(ts).toLocaleString()}</div></div>`); }
 function fileControlsHTML(id, file, hasUrl, isProtected){
-  const viewBtn = hasUrl ? `<button class="btn-min view-btn" data-id="${id}" data-name="${esc(file.name)}" data-mime="${file.mime || ''}" title="View in app">👁️ View</button>` : '';
-  const download = hasUrl && !isProtected ? `<a class="btn-min" href="${file.url}" download title="Download">⬇️ Download</a>` : '';
+  const viewBtn = hasUrl ? `<button class="btn-min view-btn" data-id="${id}" data-name="${esc(file.name)}" data-mime="${file.mime || ''}">👁️ View</button>` : '';
+  const download = hasUrl && !isProtected ? `<a class="btn-min" href="${file.url}" download>⬇️ Download</a>` : '';
   return `<div class="file-commands" style="display:flex; gap:8px">${viewBtn}${download}</div>`;
 }
 function writeFile(kind, id, file, ts=Date.now(), expiresAt=null){
-  const row = document.createElement('div'); row.className = 'row ' + (kind==='me' ? 'me' : ''); row.dataset.id = id;
-  const line = `<span class="filename">${esc(file.name)}</span> <span style="color:#9fb0c2">(${humanSize(file.size)})</span>`;
-  const badge = file.protected ? `<span class="badge">🔒 Password</span>` : '';
-  const commands = fileControlsHTML(id, file, !!file.url, !!file.protected);
-  row.innerHTML = `<div class="bubble">${bubbleMenu(id, kind==='me')}<div class="filecard">${line}${badge}</div>${commands}${expiresAt ? `<div class="expiry" data-expires="${expiresAt}" data-id="${id}">⏱ calculating…</div>` : ''}<div class="meta">${new Date(ts).toLocaleString()}</div></div>`;
-  log.appendChild(row);
-  if (file.protected && !file.url && kind !== 'me') {
-    const bubble = row.querySelector('.bubble');
-    const wrap = document.createElement('div');
-    wrap.style.marginTop = '10px';
-    wrap.innerHTML = `<input type="password" class="pwfield" placeholder="Enter password to unlock" style="background:#101725;color:#e7edf4;border:1px solid var(--border);border-radius:10px;padding:10px;width:240px"><button class="btnUnlock btn-min" data-id="${id}">Unlock</button>`;
-    bubble.appendChild(wrap);
+  const r = row(kind,id,`<div class="bubble">${bubbleMenu(id, kind==='me')}<div class="filecard"><span class="filename">${esc(file.name)}</span> <span style="color:#9fb0c2">(${humanSize(file.size)})</span>${file.protected?'<span class="badge">🔒 Password</span>':''}</div>${fileControlsHTML(id,file,!!file.url,!!file.protected)}${expiresAt?`<div class="expiry" data-expires="${expiresAt}" data-id="${id}">⏱ calculating…</div>`:''}<div class="meta">${new Date(ts).toLocaleString()}</div></div>`);
+  if (file.protected && !file.url && kind!=='me'){
+    const wrap=document.createElement('div'); wrap.style.marginTop='10px';
+    wrap.innerHTML=`<input type="password" class="pwfield" placeholder="Enter password to unlock" style="background:#101725;color:#e7edf4;border:1px solid var(--border);border-radius:10px;padding:10px;width:240px"><button class="btnUnlock btn-min" data-id="${id}">Unlock</button>`;
+    r.querySelector('.bubble').appendChild(wrap);
   }
-  log.scrollTop = log.scrollHeight;
 }
 function recallForReceiver(id, sysText){
-  const row = log.querySelector(`.row[data-id="${CSS.escape(id)}"]`); if (!row) return;
-  const bubble = row.querySelector('.bubble'); if (bubble) bubble.innerHTML = `<div class="tomb">This item was recalled by the sender.</div>`;
-  const sys = document.createElement('div'); sys.className='sys'; sys.textContent = sysText || 'This item was recalled by the sender.'; bubble?.appendChild(sys);
+  const r = log.querySelector(`.row[data-id="${CSS.escape(id)}"]`); if (!r) return;
+  const b = r.querySelector('.bubble'); if (b) b.innerHTML = `<div class="tomb">This item was recalled by the sender.</div><div class="sys">${sysText||'This item was recalled by the sender.'}</div>`;
 }
 function markOwnerRecalled(id, sysText){
-  const row = log.querySelector(`.row[data-id="${CSS.escape(id)}"]`); if (!row) return;
-  const sys = document.createElement('div'); sys.className='sys'; sys.textContent = sysText || 'You recalled this. The other person can no longer see it.'; row.querySelector('.bubble')?.appendChild(sys);
-  row.querySelector('.expiry')?.remove();
+  const r = log.querySelector(`.row[data-id="${CSS.escape(id)}"]`); if (!r) return;
+  r.querySelector('.expiry')?.remove();
+  const sys = document.createElement('div'); sys.className='sys'; sys.textContent = sysText || 'You recalled this. The other person can no longer see it.'; r.querySelector('.bubble')?.appendChild(sys);
 }
 function setOwnerUrl(id){
-  const row = log.querySelector(`.row[data-id="${CSS.escape(id)}"]`);
-  if (!row) return;
-  const commands = row.querySelector('.file-commands');
-  if (commands && !commands.querySelector('.view-btn')) {
-    const name = row.querySelector('.filename')?.textContent || 'file';
+  const r = log.querySelector(`.row[data-id="${CSS.escape(id)}"]`); if (!r) return;
+  const cmds = r.querySelector('.file-commands');
+  if (cmds && !cmds.querySelector('.view-btn')) {
+    const name = r.querySelector('.filename')?.textContent || 'file';
     const btn = document.createElement('button');
-    btn.className = 'btn-min view-btn';
-    btn.dataset.id = id; btn.dataset.name = name;
-    btn.textContent = '👁️ View';
-    commands.prepend(btn);
+    btn.className='btn-min view-btn'; btn.dataset.id = id; btn.dataset.name = name; btn.textContent='👁️ View';
+    cmds.prepend(btn);
   }
 }
-function fmtRemaining(ms){ if (ms<=0) return 'recalling…'; const s=Math.floor(ms/1000); const d=Math.floor(s/86400); const h=Math.floor((s%86400)/3600); const m=Math.floor((s%3600)/60); const ss=s%60; const p=[]; if(d)p.push(d+'d'); if(h||d)p.push(h+'h'); if(m||h||d)p.push(m+'m'); p.push(ss+'s'); return '⏱ '+p.join(' '); }
-setInterval(()=>{ const n=Date.now(); document.querySelectorAll('.expiry').forEach(el=>{ const exp=parseInt(el.getAttribute('data-expires')||'0',10); el.textContent = fmtRemaining(exp-n); }); },1000);
+setInterval(()=>{ const n=Date.now(); document.querySelectorAll('.expiry').forEach(el=>{ const exp=+el.getAttribute('data-expires')||0; const s=Math.max(0,Math.floor((exp-n)/1000)); const d=Math.floor(s/86400), h=Math.floor((s%86400)/3600), m=Math.floor((s%3600)/60), ss=s%60; el.textContent='⏱ '+(d?d+'d ':'')+(h?h+'h ':'')+(m?m+'m ':'')+ss+'s'; }); },1000);
 
-// ---- WS with retry (to /ws?room=ROOM) ----
-let ws, retries=0;
-function connectWS(){
-  const url = wsURL();
-  presence.textContent = `Connecting to ${url}…`;
-  ws = new WebSocket(url);
-
-  ws.onopen = () => { retries=0; presence.textContent = 'Connected'; title.textContent = 'Room: '+room; };
-  ws.onerror = () => { presence.textContent = 'Connection error'; };
-  ws.onclose = () => {
-    presence.textContent = 'Disconnected — retrying…';
-    const backoff = Math.min(3000 * (retries+1), 10000);
-    retries++; setTimeout(connectWS, backoff);
-  };
-  ws.onmessage = (ev) => {
-    const d = JSON.parse(ev.data);
-    if (d.type === 'room_full') { presence.textContent = 'Room is full'; writeText('them','_','Room is full. Use a different path for a new room.'); return; }
-    if (d.type === 'welcome') { myId = d.yourId; presence.textContent = `Connected • users: ${(d.users||[]).length}`; title.textContent = `Room: ${d.room} • You: ${myId}`; return; }
-    if (d.type === 'presence') { presence.textContent = `Connected • users: ${(d.users||[]).length}`; return; }
-    if (d.type === 'chat') { writeText(d.fromId===myId?'me':'them', d.id, d.text, d.ts); return; }
-    if (d.type === 'file') { writeFile(d.fromId===myId?'me':'them', d.id, d.file, d.ts, d.expiresAt || null); return; }
-    if (d.type === 'file_owner') { setOwnerUrl(d.id); return; }
-    if (d.type === 'file_unlocked') {
-      const row = log.querySelector(`.row[data-id="${CSS.escape(d.id)}"]`);
-      row?.querySelector('.pwfield')?.remove();
-      row?.querySelector('.btnUnlock')?.remove();
-      setOwnerUrl(d.id);
-      return;
-    }
-    if (d.type === 'recalled') { recallForReceiver(d.id, d.sys); return; }
-    if (d.type === 'recalled_owner') { markOwnerRecalled(d.id, d.sys); return; }
-    if (d.type === 'error') { writeText('them','_','⚠️ '+(d.message||'Error')); return; }
-  };
+// Viewer (same as before)
+async function openViewerFor(id){
+  let info;
+  try{
+    const res = await fetch(`/fileurl/${encodeURIComponent(id)}`);
+    info = await res.json();
+    if (!res.ok || !info?.ok) throw new Error(info?.error || 'Not accessible');
+  }catch(err){ writeText('them','_','⚠️ '+(err?.message || 'Preview not accessible')); return; }
+  const { url, mime, name } = info;
+  const w = window.open(url, '_blank','noopener'); if (!w) alert('Popup blocked. Please allow popups to preview.');
 }
-connectWS();
 
-// ---- send / recall ----
-function send(){ const text = msgInput.value.trim(); if(!text || ws.readyState!==1) return; ws.send(JSON.stringify({type:'chat', text})); msgInput.value=''; }
-function recall(id){ if (ws.readyState!==1) return; ws.send(JSON.stringify({ type:'recall', id })); }
+// Transport: WS first, then SSE fallback
+function wsURL(){ const proto = location.protocol==='https:'?'wss://':'ws://'; return proto + location.host + '/ws?room=' + encodeURIComponent(room); }
+function startWS(){
+  transport='ws';
+  const url = wsURL();
+  presence.textContent = `Connecting (WebSocket)…`;
+  ws = new WebSocket(url);
+  ws.onopen = () => { retries=0; presence.textContent='Connected (WebSocket)'; title.textContent='Room: '+room; };
+  ws.onerror = () => { presence.textContent='WebSocket error'; };
+  ws.onclose = () => {
+    retries++;
+    if (retries >= 3) { startSSE(); return; }
+    presence.textContent = 'WS closed — retrying…';
+    setTimeout(startWS, Math.min(3000*retries,10000));
+  };
+  ws.onmessage = (ev) => handleEvent(JSON.parse(ev.data));
+}
+function startSSE(){
+  transport='sse';
+  presence.textContent = 'Connecting (Fallback)…';
+  sse = new EventSource('/sse?room='+encodeURIComponent(room));
+  sse.onopen  = () => { presence.textContent='Connected (Fallback)'; title.textContent='Room: '+room+' • Fallback'; };
+  sse.onerror = () => { presence.textContent='Reconnecting (Fallback)…'; };
+  sse.onmessage = (ev) => { try{ handleEvent(JSON.parse(ev.data)); }catch{} };
+}
+function sendEvent(obj){
+  if (transport==='ws' && ws && ws.readyState===1) {
+    ws.send(JSON.stringify(obj));
+  } else {
+    // Fallback: POST /push
+    fetch('/push', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ room, ...obj, fromId: myId }) });
+  }
+}
+startWS();
+
+// Handle events
+function handleEvent(d){
+  if (d.type === 'room_full') { presence.textContent='Room is full'; writeText('them','_','Room is full. Use a different path.'); return; }
+  if (d.type === 'welcome') { if (d.yourId) myId = d.yourId; presence.textContent = (transport==='ws'?'Connected (WebSocket)':'Connected (Fallback)'); title.textContent = `Room: ${d.room} ${myId?`• You: ${myId}`:''}`; return; }
+  if (d.type === 'presence') { presence.textContent = `Connected • users: ${(d.users||[]).length}`; return; }
+  if (d.type === 'chat') { writeText(d.fromId===myId?'me':'them', d.id, d.text, d.ts); return; }
+  if (d.type === 'file') { writeFile(d.fromId===myId?'me':'them', d.id, d.file, d.ts, d.expiresAt||null); return; }
+  if (d.type === 'file_owner') { setOwnerUrl(d.id); return; }
+  if (d.type === 'file_unlocked') {
+    const r = log.querySelector(`.row[data-id="${CSS.escape(d.id)}"]`);
+    r?.querySelector('.pwfield')?.remove(); r?.querySelector('.btnUnlock')?.remove();
+    setOwnerUrl(d.id); return;
+  }
+  if (d.type === 'recalled') { recallForReceiver(d.id, d.sys); return; }
+  if (d.type === 'recalled_owner') { markOwnerRecalled(d.id, d.sys); return; }
+  if (d.type === 'error') { writeText('them','_','⚠️ '+(d.message||'Error')); return; }
+}
+
+// Send / Recall
+function send(){ const text = msgInput.value.trim(); if(!text) return; sendEvent({ type:'chat', text }); msgInput.value=''; }
+function recall(id){ sendEvent({ type:'recall', id }); }
 sendBtn.onclick = send;
 msgInput.addEventListener('keydown', (e)=>{ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); send(); }});
 
-// ---- Attachment sheet (Recall After / Password) ----
+// Attachment sheet (same behavior as your last version)
 const overlay = document.getElementById('overlay');
 const sheet   = document.getElementById('sheet');
 const choices = document.getElementById('choices');
@@ -245,9 +252,7 @@ const selM = document.getElementById('ttlMinutes');
 const selS = document.getElementById('ttlSeconds');
 const pwInput = document.getElementById('pwInput');
 
-let pendingFiles = null;
-let mode = null;
-
+let pendingFiles = null; let mode = null;
 function fillSelect(sel, max){ sel.innerHTML=''; for(let i=0;i<=max;i++){ const o=document.createElement('option'); o.value=i; o.textContent=String(i).padStart(2,'0'); sel.appendChild(o);} }
 fillSelect(selD, 30); fillSelect(selH, 23); fillSelect(selM, 59); fillSelect(selS, 59);
 
@@ -258,12 +263,7 @@ function showTTL(){ choices.style.display='none'; panelTTL.classList.add('active
 function showPW(){ choices.style.display='none'; panelPW.classList.add('active'); panelTTL.classList.remove('active'); backBtn.style.display='inline'; pwInput.value=''; pwInput.focus(); mode='pw'; }
 
 attachBtn.addEventListener('click', ()=> fileInput.click());
-fileInput.addEventListener('change', (e)=>{
-  const files = Array.from(e.target.files||[]);
-  if (!files.length) return;
-  pendingFiles = files;
-  openSheet();
-});
+fileInput.addEventListener('change', (e)=>{ const files = Array.from(e.target.files||[]); if(!files.length) return; pendingFiles = files; openSheet(); });
 overlay.addEventListener('click', closeSheet);
 cancelAttach.addEventListener('click', closeSheet);
 backBtn.addEventListener('click', showChoices);
@@ -283,7 +283,6 @@ async function uploadFiles(files, ttlSeconds=0, password=''){
   }
   fileInput.value = '';
 }
-
 sendFilesBtn.addEventListener('click', async ()=>{
   if (!pendingFiles) return closeSheet();
   let ttlSeconds=0, password='';
@@ -293,35 +292,22 @@ sendFilesBtn.addEventListener('click', async ()=>{
   closeSheet();
 });
 
-// Unlock
+// Unlock & menu & view
 log.addEventListener('click', async (e) => {
-  const btn = e.target.closest('.btnUnlock'); if (!btn) return;
-  const id = btn.dataset.id;
-  const row = log.querySelector(`.row[data-id="${CSS.escape(id)}"]`);
-  const pwf = row?.querySelector('.pwfield'); const pass = pwf?.value || '';
-  try{
-    const res = await fetch(`/unlock/${encodeURIComponent(id)}`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ password: pass }) });
-    if (!res.ok) { const j = await res.json().catch(()=>({})); console.warn(j.error || 'Unlock failed'); }
-  }catch(err){ console.warn(err); }
-});
-
-// Menus
-log.addEventListener('click', (e) => {
-  const btn = e.target.closest('button'); if (!btn) return;
-  const action = btn.dataset.action; const id = btn.dataset.id;
-  if (action === 'open-menu') {
-    document.querySelectorAll('.menu.open').forEach(m => m.classList.remove('open'));
-    const menu = log.querySelector(`.menu[data-menu-for="${CSS.escape(id)}"]`);
-    if (menu) menu.classList.add('open');
+  // unlock
+  const ub = e.target.closest('.btnUnlock');
+  if (ub){ const id = ub.dataset.id; const r = log.querySelector(`.row[data-id="${CSS.escape(id)}"]`); const p = r?.querySelector('.pwfield')?.value || '';
+    const res = await fetch(`/unlock/${encodeURIComponent(id)}`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ password: p }) });
+    if (!res.ok) { let j={}; try{ j=await res.json(); }catch{}; writeText('them','_','⚠️ '+(j.error || 'Unlock failed')); }
+    return;
   }
-  if (action === 'recall') {
-    const menu = log.querySelector(`.menu[data-menu-for="${CSS.escape(id)}"]`); if (menu) menu.classList.remove('open');
-    if (ws.readyState===1) ws.send(JSON.stringify({ type:'recall', id }));
-  }
+  // menu
+  const btn = e.target.closest('button'); if (btn && btn.dataset.action==='open-menu'){ document.querySelectorAll('.menu.open').forEach(m=>m.classList.remove('open')); const menu = log.querySelector(`.menu[data-menu-for="${CSS.escape(btn.dataset.id)}"]`); if (menu) menu.classList.add('open'); return; }
+  if (btn && btn.dataset.action==='recall'){ document.querySelectorAll('.menu.open').forEach(m=>m.classList.remove('open')); recall(btn.dataset.id); return; }
+  // view
+  const vb = e.target.closest('.view-btn'); if (vb){ openViewerFor(vb.dataset.id); return; }
 });
-document.addEventListener('click', (e) => {
-  const inside = e.target.closest('.menu, .kebab, .sheet'); if (!inside) document.querySelectorAll('.menu.open').forEach(m => m.classList.remove('open'));
-});
+document.addEventListener('click', (e) => { const inside = e.target.closest('.menu, .kebab, .sheet'); if (!inside) document.querySelectorAll('.menu.open').forEach(m => m.classList.remove('open')); });
 </script>
 </body>
 </html>
