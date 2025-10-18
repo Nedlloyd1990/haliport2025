@@ -16,10 +16,12 @@
   .bubble{max-width:900px;width:fit-content;background:#172131;border:1px solid var(--border);padding:12px 14px;border-radius:16px;font-size:1.05rem;line-height:1.5;position:relative}
   .me .bubble{background:#0f2744;border-color:#133659}
   .meta{color:#9fb0c2;font-size:.85rem;margin-top:6px;text-align:right}
+
   .composer{position:sticky;bottom:0;display:flex;gap:12px;align-items:flex-end;border-top:1px solid var(--border);padding:14px 16px;background:var(--panel)}
   .textarea{flex:1;min-height:56px;max-height:220px;padding:14px;border-radius:14px;border:1px solid var(--border);background:var(--panel2);color:var(--text);resize:vertical;font-size:1.05rem;line-height:1.5;outline:none}
   .send{background:#1b87f3;border:0;color:#fff;padding:14px 22px;border-radius:14px;cursor:pointer;font-size:1rem}
   .iconbtn{border:1px solid var(--border);background:var(--panel2);color:var(--text);border-radius:12px;cursor:pointer;height:48px;width:48px;display:grid;place-items:center}
+
   .filecard{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
   .filename{word-break:break-all}
   .btn-min{display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border-radius:10px;border:1px solid var(--border);background:var(--glass);cursor:pointer;color:#e7edf4;text-decoration:none}
@@ -31,15 +33,45 @@
   .row.me .sys{ text-align:right; }
   .status{ color:#9fb0c2; font-size:.92rem; }
 
+  /* kebab */
   .kebab{ position:absolute; top:6px; right:6px; width:32px; height:32px; display:grid; place-items:center; font-size:18px; background:var(--glass); border:1px solid rgba(255,255,255,.18); border-radius:10px; color:#e7edf4; cursor:pointer; opacity:.7; }
   .bubble:hover .kebab{ opacity:1; }
   .menu{ position:absolute; top:42px; right:6px; background:#0e1622; border:1px solid var(--border); border-radius:12px; box-shadow:0 12px 30px rgba(0,0,0,.4); display:none; min-width:170px; z-index:5; }
   .menu.open{ display:block }
   .menu button{ width:100%; text-align:left; padding:10px 12px; background:transparent; border:0; color:#e7edf4; cursor:pointer; font-size:.95rem }
 
+  /* Attachment sheet */
+  .overlay{ position:fixed; inset:0; background:rgba(0,0,0,.45); display:none; z-index:40; }
+  .overlay.open{ display:block; }
+  .sheet{ position:fixed; left:50%; top:50%; transform:translate(-50%,-50%); width:min(680px, 94vw);
+          background:#0f1622; border:1px solid var(--border); border-radius:20px;
+          box-shadow:0 30px 100px rgba(0,0,0,.65); padding:18px; display:none; z-index:41; }
+  .sheet.open{ display:block; }
+  .sheet h3{ margin:8px 0 14px; font-weight:700; letter-spacing:.2px }
+  .choices{ display:grid; grid-template-columns:1fr 1fr; gap:12px; margin:12px 0 6px }
+  .choice{ background:linear-gradient(180deg,#0f1927,#0d131d); border:1px solid var(--border);
+           border-radius:16px; padding:16px; cursor:pointer; display:flex; flex-direction:column; gap:8px;
+           transition:transform .12s ease, box-shadow .12s ease, border-color .12s ease; }
+  .choice:hover{ transform:translateY(-2px); box-shadow:0 12px 30px rgba(0,0,0,.4); border-color:#27405e }
+  .choice .title{ font-weight:600 }
+  .choice .desc{ color:#a9bdd2; font-size:.9rem }
+  .divider{ height:1px; background:var(--border); margin:12px 0 }
+  .panel{ display:none; gap:10px; align-items:center; flex-wrap:wrap; }
+  .panel.active{ display:flex }
+  .select{ background:#101725; color:#e7edf4; border:1px solid var(--border); border-radius:12px; padding:8px 10px; }
+  .input{ background:#101725; color:#e7edf4; border:1px solid var(--border); border-radius:12px; padding:9px 12px; }
+  .actions{ display:flex; gap:10px; justify-content:flex-end; margin-top:14px }
+  .btn{ border:1px solid var(--border); background:#1b87f3; color:#fff; padding:10px 14px; border-radius:12px; cursor:pointer; font-weight:600; }
+  .btn.secondary{ background:#0f151e; color:#e7edf4 }
+  .ghost{ background:transparent; border:0; color:#a9bdd2; cursor:pointer; }
+  .ghost:hover{ color:#d5e6ff; text-decoration:underline }
+
+  /* viewer */
   .viewer-overlay{ position:fixed; inset:0; background:rgba(0,0,0,.6); display:none; z-index:60; }
   .viewer-overlay.open{ display:block; }
-  .viewer{ position:fixed; left:50%; top:50%; transform:translate(-50%,-50%); width:min(1200px, 96vw); height:min(80vh, 900px); background:#0e1520; border:1px solid var(--border); border-radius:16px; box-shadow:0 30px 120px rgba(0,0,0,.7); display:none; z-index:61; overflow:hidden; }
+  .viewer{ position:fixed; left:50%; top:50%; transform:translate(-50%,-50%);
+           width:min(1200px, 96vw); height:min(80vh, 900px); background:#0e1520; border:1px solid var(--border);
+           border-radius:16px; box-shadow:0 30px 120px rgba(0,0,0,.7); display:none; z-index:61; overflow:hidden; }
   .viewer.open{ display:flex; flex-direction:column; }
   .viewer-header{ display:flex; align-items:center; justify-content:space-between; padding:10px 14px; border-bottom:1px solid var(--border); background:#101827 }
   .viewer-title{ font-weight:600; color:#dfeafb; overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
@@ -67,6 +99,47 @@
   </div>
 </div>
 
+<!-- ===== Attachment Options Sheet ===== -->
+<div id="overlay" class="overlay"></div>
+<div id="sheet" class="sheet" role="dialog" aria-modal="true" aria-labelledby="attTitle">
+  <h3 id="attTitle">Attachment Options</h3>
+
+  <!-- Step 1: two choices only -->
+  <div id="choices" class="choices">
+    <div id="chooseTTL" class="choice">
+      <div class="title">Recall After</div>
+      <div class="desc">Auto-recall after a set time. Both sides see a red countdown.</div>
+    </div>
+    <div id="choosePW" class="choice">
+      <div class="title">Recall with Password</div>
+      <div class="desc">Receiver must enter a password to view. One wrong attempt recalls the file.</div>
+    </div>
+  </div>
+
+  <div class="divider"></div>
+
+  <!-- Step 2A: TTL panel -->
+  <div id="panelTTL" class="panel" aria-hidden="true">
+    <span style="min-width:110px;color:#cfe1f7">Recall after</span>
+    <select id="ttlDays" class="select"></select><span>days</span>
+    <select id="ttlHours" class="select"></select><span>hours</span>
+    <select id="ttlMinutes" class="select"></select><span>minutes</span>
+    <select id="ttlSeconds" class="select"></select><span>seconds</span>
+  </div>
+
+  <!-- Step 2B: Password panel -->
+  <div id="panelPW" class="panel" aria-hidden="true">
+    <span style="min-width:110px;color:#cfe1f7">Enter password</span>
+    <input id="pwInput" class="input" type="password" placeholder="Enter password" minlength="1" />
+  </div>
+
+  <div class="actions">
+    <button id="backChoice" class="ghost" style="margin-right:auto; display:none">← Back</button>
+    <button id="sendFiles" class="btn">Send files</button>
+    <button id="cancelAttach" class="btn secondary">Cancel</button>
+  </div>
+</div>
+
 <!-- Viewer -->
 <div id="viewerOverlay" class="viewer-overlay"></div>
 <div id="viewer" class="viewer" role="dialog" aria-modal="true" aria-labelledby="viewerTitle">
@@ -89,13 +162,13 @@ const fileInput = document.getElementById('fileInput');
 let myId = null;
 let myRoom = location.pathname.replace(/^\/+|\/+$/g,'') || 'chat';
 
-function wsURL(){
-  const proto = location.protocol === 'https:' ? 'wss://' : 'ws://';
-  return proto + location.host + location.pathname;
-}
-function esc(s){ return String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+/* ---------- helpers ---------- */
+function wsURL(){ const proto = location.protocol === 'https:' ? 'wss://' : 'ws://'; return proto + location.host + location.pathname; }
+function esc(s){ return String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&gt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]); }
 function humanSize(b){ const u=['B','KB','MB','GB']; let v=b,i=0; while(v>=1024&&i<u.length-1){v/=1024;i++;} return v.toFixed(v>=10||i===0?0:1)+' '+u[i]; }
 function bubbleMenu(id, mine){ return `<button class="kebab" data-action="open-menu" data-id="${id}" ${mine?'':'style="display:none"'}>⋯</button><div class="menu" data-menu-for="${id}"><button data-action="recall" data-id="${id}">Recall</button></div>`; }
+
+/* ---------- render ---------- */
 function writeText(kind, id, text, ts=Date.now()){
   const row = document.createElement('div');
   row.className = 'row ' + (kind==='me' ? 'me' : '');
@@ -147,10 +220,23 @@ function setOwnerUrl(id){
     commands.prepend(btn);
   }
 }
+
+/* ---------- countdown ---------- */
 function fmtRemaining(ms){ if (ms<=0) return 'recalling…'; const s=Math.floor(ms/1000); const d=Math.floor(s/86400); const h=Math.floor((s%86400)/3600); const m=Math.floor((s%3600)/60); const ss=s%60; const p=[]; if(d)p.push(d+'d'); if(h||d)p.push(h+'h'); if(m||h||d)p.push(m+'m'); p.push(ss+'s'); return '⏱ '+p.join(' '); }
 setInterval(()=>{ const n=Date.now(); document.querySelectorAll('.expiry').forEach(el=>{ const exp=parseInt(el.getAttribute('data-expires')||'0',10); el.textContent = fmtRemaining(exp-n); }); },1000);
 
-// ===== WS with retry =====
+/* ---------- viewer ---------- */
+const viewerOverlay = document.getElementById('viewerOverlay');
+const viewer        = document.getElementById('viewer');
+const viewerBody    = document.getElementById('viewerBody');
+const viewerTitle   = document.getElementById('viewerTitle');
+const viewerClose   = document.getElementById('viewerClose');
+function openViewer(){ viewerOverlay.classList.add('open'); viewer.classList.add('open'); }
+function closeViewer(){ viewerOverlay.classList.remove('open'); viewer.classList.remove('open'); viewerBody.innerHTML=''; viewerTitle.textContent='Preview'; }
+viewerOverlay.addEventListener('click', closeViewer);
+viewerClose.addEventListener('click', closeViewer);
+
+/* ---------- WS with retry ---------- */
 let ws, retries=0;
 function connectWS(){
   const url = wsURL();
@@ -159,10 +245,7 @@ function connectWS(){
 
   ws.onopen = () => { retries=0; presence.textContent = 'Connected'; title.textContent = 'Room: '+myRoom; };
 
-  ws.onerror = (e) => {
-    console.error('[WS] error', e);
-    presence.textContent = 'Connection error';
-  };
+  ws.onerror = (e) => { console.error('[WS] error', e); presence.textContent = 'Connection error'; };
 
   ws.onclose = (ev) => {
     console.warn('[WS] closed', ev.code, ev.reason);
@@ -174,30 +257,11 @@ function connectWS(){
 
   ws.onmessage = (ev) => {
     const d = JSON.parse(ev.data);
-
-    if (d.type === 'room_full') {
-      presence.textContent = 'Room is full';
-      writeText('them','_','Room is full. Create a new path, e.g., /chat-1234');
-      return;
-    }
-    if (d.type === 'welcome') {
-      myId = d.yourId;
-      presence.textContent = `Connected • users: ${(d.users||[]).length}`;
-      title.textContent = `Room: ${d.room} • You: ${myId}`;
-      return;
-    }
-    if (d.type === 'presence') {
-      presence.textContent = `Connected • users: ${(d.users||[]).length}`;
-      return;
-    }
-    if (d.type === 'chat') {
-      const who = d.fromId === myId ? 'me' : 'them';
-      writeText(who, d.id, d.text, d.ts); return;
-    }
-    if (d.type === 'file') {
-      const who = d.fromId === myId ? 'me' : 'them';
-      writeFile(who, d.id, d.file, d.ts, d.expiresAt || null); return;
-    }
+    if (d.type === 'room_full') { presence.textContent = 'Room is full'; writeText('them','_','Room is full. Create a new path, e.g., /chat-1234'); return; }
+    if (d.type === 'welcome') { myId = d.yourId; presence.textContent = `Connected • users: ${(d.users||[]).length}`; title.textContent = `Room: ${d.room} • You: ${myId}`; return; }
+    if (d.type === 'presence') { presence.textContent = `Connected • users: ${(d.users||[]).length}`; return; }
+    if (d.type === 'chat') { writeText(d.fromId===myId?'me':'them', d.id, d.text, d.ts); return; }
+    if (d.type === 'file') { writeFile(d.fromId===myId?'me':'them', d.id, d.file, d.ts, d.expiresAt || null); return; }
     if (d.type === 'file_owner') { setOwnerUrl(d.id); return; }
     if (d.type === 'file_unlocked') {
       const row = log.querySelector(`.row[data-id="${CSS.escape(d.id)}"]`);
@@ -213,13 +277,54 @@ function connectWS(){
 }
 connectWS();
 
-// send / recall
+/* ---------- send / recall ---------- */
 function send(){ const text = msgInput.value.trim(); if(!text || ws.readyState!==1) return; ws.send(JSON.stringify({type:'chat', text})); msgInput.value=''; }
 function recall(id){ if (ws.readyState!==1) return; ws.send(JSON.stringify({ type:'recall', id })); }
 sendBtn.onclick = send;
 msgInput.addEventListener('keydown', (e)=>{ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); send(); }});
 
-// upload (no TTL/PW here; your sheet can call uploadFiles with options)
+/* ---------- Attachment Sheet logic ---------- */
+const overlay = document.getElementById('overlay');
+const sheet   = document.getElementById('sheet');
+const choices = document.getElementById('choices');
+const panelTTL= document.getElementById('panelTTL');
+const panelPW = document.getElementById('panelPW');
+const backBtn = document.getElementById('backChoice');
+const sendFilesBtn = document.getElementById('sendFiles');
+const cancelAttach = document.getElementById('cancelAttach');
+const chooseTTL = document.getElementById('chooseTTL');
+const choosePW  = document.getElementById('choosePW');
+const selD = document.getElementById('ttlDays');
+const selH = document.getElementById('ttlHours');
+const selM = document.getElementById('ttlMinutes');
+const selS = document.getElementById('ttlSeconds');
+const pwInput = document.getElementById('pwInput');
+
+let pendingFiles = null;
+let mode = null; // 'ttl' | 'pw'
+
+function fillSelect(sel, max){ sel.innerHTML=''; for(let i=0;i<=max;i++){ const o=document.createElement('option'); o.value=i; o.textContent=String(i).padStart(2,'0'); sel.appendChild(o);} }
+fillSelect(selD, 30); fillSelect(selH, 23); fillSelect(selM, 59); fillSelect(selS, 59);
+
+function openSheet(){ overlay.classList.add('open'); sheet.classList.add('open'); showChoices(); }
+function closeSheet(){ overlay.classList.remove('open'); sheet.classList.remove('open'); pendingFiles=null; mode=null; }
+function showChoices(){ choices.style.display='grid'; panelTTL.classList.remove('active'); panelPW.classList.remove('active'); panelTTL.setAttribute('aria-hidden','true'); panelPW.setAttribute('aria-hidden','true'); backBtn.style.display='none'; }
+function showTTL(){ choices.style.display='none'; panelTTL.classList.add('active'); panelPW.classList.remove('active'); panelTTL.setAttribute('aria-hidden','false'); panelPW.setAttribute('aria-hidden','true'); backBtn.style.display='inline'; selD.value='0'; selH.value='0'; selM.value='0'; selS.value='0'; mode='ttl'; }
+function showPW(){ choices.style.display='none'; panelPW.classList.add('active'); panelTTL.classList.remove('active'); panelPW.setAttribute('aria-hidden','false'); panelTTL.setAttribute('aria-hidden','true'); backBtn.style.display='inline'; pwInput.value=''; pwInput.focus(); mode='pw'; }
+
+attachBtn.addEventListener('click', ()=> fileInput.click());
+fileInput.addEventListener('change', (e)=>{
+  const files = Array.from(e.target.files||[]);
+  if (!files.length) return;
+  pendingFiles = files;
+  openSheet(); // <— recall conditions now appear immediately after selecting a picture/file
+});
+overlay.addEventListener('click', closeSheet);
+cancelAttach.addEventListener('click', closeSheet);
+backBtn.addEventListener('click', showChoices);
+chooseTTL.addEventListener('click', showTTL);
+choosePW.addEventListener('click', showPW);
+
 async function uploadFiles(files, ttlSeconds=0, password=''){
   const form = new FormData();
   for (const f of files) form.append('file', f);
@@ -231,16 +336,26 @@ async function uploadFiles(files, ttlSeconds=0, password=''){
     let j={}; try{ j=await res.json(); }catch{}
     writeText('them','_','⚠️ '+(j.error || ('Upload failed: '+res.status)));
   }
-}
-attachBtn.addEventListener('click', ()=> fileInput.click());
-fileInput.addEventListener('change', async (e) => {
-  const files = Array.from(e.target.files || []);
-  if (!files.length) return;
-  await uploadFiles(files, 0, '');
   fileInput.value = '';
+}
+
+sendFilesBtn.addEventListener('click', async ()=>{
+  if (!pendingFiles) return closeSheet();
+  let ttlSeconds=0, password='';
+  if (mode==='ttl'){
+    const d=+selD.value||0, h=+selH.value||0, m=+selM.value||0, s=+selS.value||0;
+    ttlSeconds = d*86400 + h*3600 + m*60 + s;
+  } else if (mode==='pw'){
+    password = pwInput.value.trim();
+    if (!password){ alert('Please enter a password'); return; }
+  } else {
+    // If user closes sheet without choosing, default to immediate send w/out options
+  }
+  await uploadFiles(pendingFiles, ttlSeconds, password);
+  closeSheet();
 });
 
-// unlock
+/* ---------- unlock ---------- */
 log.addEventListener('click', async (e) => {
   const btn = e.target.closest('.btnUnlock'); if (!btn) return;
   const id = btn.dataset.id;
@@ -252,7 +367,7 @@ log.addEventListener('click', async (e) => {
   }catch(err){ console.warn(err); }
 });
 
-// menus
+/* ---------- menus ---------- */
 log.addEventListener('click', (e) => {
   const btn = e.target.closest('button'); if (!btn) return;
   const action = btn.dataset.action; const id = btn.dataset.id;
@@ -267,20 +382,10 @@ log.addEventListener('click', (e) => {
   }
 });
 document.addEventListener('click', (e) => {
-  const inside = e.target.closest('.menu, .kebab, .viewer'); if (!inside) document.querySelectorAll('.menu.open').forEach(m => m.classList.remove('open'));
+  const inside = e.target.closest('.menu, .kebab, .sheet, .viewer'); if (!inside) document.querySelectorAll('.menu.open').forEach(m => m.classList.remove('open'));
 });
 
-// viewer
-const viewerOverlay = document.getElementById('viewerOverlay');
-const viewer        = document.getElementById('viewer');
-const viewerBody    = document.getElementById('viewerBody');
-const viewerTitle   = document.getElementById('viewerTitle');
-const viewerClose   = document.getElementById('viewerClose');
-function openViewer(){ viewerOverlay.classList.add('open'); viewer.classList.add('open'); }
-function closeViewer(){ viewerOverlay.classList.remove('open'); viewer.classList.remove('open'); viewerBody.innerHTML=''; viewerTitle.textContent='Preview'; }
-viewerOverlay.addEventListener('click', closeViewer);
-viewerClose.addEventListener('click', closeViewer);
-
+/* ---------- view inline ---------- */
 log.addEventListener('click', async (e) => {
   const vb = e.target.closest('.view-btn'); if (!vb) return;
   const id = vb.dataset.id;
