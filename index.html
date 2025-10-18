@@ -20,7 +20,6 @@
   .textarea{flex:1;min-height:56px;max-height:220px;padding:14px;border-radius:14px;border:1px solid var(--border);background:var(--panel2);color:var(--text);resize:vertical;font-size:1.05rem;line-height:1.5;outline:none}
   .send{background:#1b87f3;border:0;color:#fff;padding:14px 22px;border-radius:14px;cursor:pointer;font-size:1rem}
   .iconbtn{border:1px solid var(--border);background:var(--panel2);color:var(--text);border-radius:12px;cursor:pointer;height:48px;width:48px;display:grid;place-items:center}
-
   .filecard{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
   .filename{word-break:break-all}
   .btn-min{display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border-radius:10px;border:1px solid var(--border);background:var(--glass);cursor:pointer;color:#e7edf4;text-decoration:none}
@@ -111,6 +110,11 @@
 </div>
 
 <script>
+// Warn if opened as a file (no server => no connection)
+if (location.protocol === 'file:') {
+  alert('You opened index.html from your filesystem. Please run `node server.js` and open http://localhost:3000/ (or your host URL).');
+}
+
 const log = document.getElementById('log');
 const title = document.getElementById('title');
 const presence = document.getElementById('presence');
@@ -164,7 +168,7 @@ function setOwnerUrl(id){
 }
 setInterval(()=>{ const n=Date.now(); document.querySelectorAll('.expiry').forEach(el=>{ const exp=+el.getAttribute('data-expires')||0; const s=Math.max(0,Math.floor((exp-n)/1000)); const d=Math.floor(s/86400), h=Math.floor((s%86400)/3600), m=Math.floor((s%3600)/60), ss=s%60; el.textContent='⏱ '+(d?d+'d ':'')+(h?h+'h ':'')+(m?m+'m ':'')+ss+'s'; }); },1000);
 
-// Viewer (same as before)
+// Viewer (opens secure URL; simple & reliable across file types)
 async function openViewerFor(id){
   let info;
   try{
@@ -172,20 +176,22 @@ async function openViewerFor(id){
     info = await res.json();
     if (!res.ok || !info?.ok) throw new Error(info?.error || 'Not accessible');
   }catch(err){ writeText('them','_','⚠️ '+(err?.message || 'Preview not accessible')); return; }
-  const { url, mime, name } = info;
+  const { url } = info;
   const w = window.open(url, '_blank','noopener'); if (!w) alert('Popup blocked. Please allow popups to preview.');
 }
 
-// Transport: WS first, then SSE fallback
+// ---- Transport: WebSocket first, then SSE fallback ----
 function wsURL(){ const proto = location.protocol==='https:'?'wss://':'ws://'; return proto + location.host + '/ws?room=' + encodeURIComponent(room); }
 function startWS(){
   transport='ws';
   const url = wsURL();
   presence.textContent = `Connecting (WebSocket)…`;
+  console.log('[WS] trying', url);
   ws = new WebSocket(url);
-  ws.onopen = () => { retries=0; presence.textContent='Connected (WebSocket)'; title.textContent='Room: '+room; };
-  ws.onerror = () => { presence.textContent='WebSocket error'; };
-  ws.onclose = () => {
+  ws.onopen = () => { retries=0; presence.textContent='Connected (WebSocket)'; title.textContent='Room: '+room; console.log('[WS] open'); };
+  ws.onerror = (e) => { presence.textContent='WebSocket error'; console.warn('[WS] error', e); };
+  ws.onclose = (ev) => {
+    console.warn('[WS] closed', ev.code, ev.reason);
     retries++;
     if (retries >= 3) { startSSE(); return; }
     presence.textContent = 'WS closed — retrying…';
@@ -196,10 +202,12 @@ function startWS(){
 function startSSE(){
   transport='sse';
   presence.textContent = 'Connecting (Fallback)…';
-  sse = new EventSource('/sse?room='+encodeURIComponent(room));
-  sse.onopen  = () => { presence.textContent='Connected (Fallback)'; title.textContent='Room: '+room+' • Fallback'; };
-  sse.onerror = () => { presence.textContent='Reconnecting (Fallback)…'; };
-  sse.onmessage = (ev) => { try{ handleEvent(JSON.parse(ev.data)); }catch{} };
+  const url = '/sse?room='+encodeURIComponent(room);
+  console.log('[SSE] trying', url);
+  sse = new EventSource(url);
+  sse.onopen  = () => { presence.textContent='Connected (Fallback)'; title.textContent='Room: '+room+' • Fallback'; console.log('[SSE] open'); };
+  sse.onerror = (e) => { presence.textContent='Reconnecting (Fallback)…'; console.warn('[SSE] error', e); };
+  sse.onmessage = (ev) => { try{ handleEvent(JSON.parse(ev.data)); }catch(e){ console.warn('[SSE] bad event', e); } };
 }
 function sendEvent(obj){
   if (transport==='ws' && ws && ws.readyState===1) {
@@ -211,7 +219,7 @@ function sendEvent(obj){
 }
 startWS();
 
-// Handle events
+// ---- Event handler ----
 function handleEvent(d){
   if (d.type === 'room_full') { presence.textContent='Room is full'; writeText('them','_','Room is full. Use a different path.'); return; }
   if (d.type === 'welcome') { if (d.yourId) myId = d.yourId; presence.textContent = (transport==='ws'?'Connected (WebSocket)':'Connected (Fallback)'); title.textContent = `Room: ${d.room} ${myId?`• You: ${myId}`:''}`; return; }
@@ -229,13 +237,13 @@ function handleEvent(d){
   if (d.type === 'error') { writeText('them','_','⚠️ '+(d.message||'Error')); return; }
 }
 
-// Send / Recall
+// ---- Send / Recall ----
 function send(){ const text = msgInput.value.trim(); if(!text) return; sendEvent({ type:'chat', text }); msgInput.value=''; }
 function recall(id){ sendEvent({ type:'recall', id }); }
 sendBtn.onclick = send;
 msgInput.addEventListener('keydown', (e)=>{ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); send(); }});
 
-// Attachment sheet (same behavior as your last version)
+// ---- Attachment sheet ----
 const overlay = document.getElementById('overlay');
 const sheet   = document.getElementById('sheet');
 const choices = document.getElementById('choices');
@@ -294,20 +302,34 @@ sendFilesBtn.addEventListener('click', async ()=>{
 
 // Unlock & menu & view
 log.addEventListener('click', async (e) => {
-  // unlock
   const ub = e.target.closest('.btnUnlock');
-  if (ub){ const id = ub.dataset.id; const r = log.querySelector(`.row[data-id="${CSS.escape(id)}"]`); const p = r?.querySelector('.pwfield')?.value || '';
+  if (ub){
+    const id = ub.dataset.id;
+    const r = log.querySelector(`.row[data-id="${CSS.escape(id)}"]`);
+    const p = r?.querySelector('.pwfield')?.value || '';
     const res = await fetch(`/unlock/${encodeURIComponent(id)}`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ password: p }) });
     if (!res.ok) { let j={}; try{ j=await res.json(); }catch{}; writeText('them','_','⚠️ '+(j.error || 'Unlock failed')); }
     return;
   }
-  // menu
-  const btn = e.target.closest('button'); if (btn && btn.dataset.action==='open-menu'){ document.querySelectorAll('.menu.open').forEach(m=>m.classList.remove('open')); const menu = log.querySelector(`.menu[data-menu-for="${CSS.escape(btn.dataset.id)}"]`); if (menu) menu.classList.add('open'); return; }
-  if (btn && btn.dataset.action==='recall'){ document.querySelectorAll('.menu.open').forEach(m=>m.classList.remove('open')); recall(btn.dataset.id); return; }
-  // view
-  const vb = e.target.closest('.view-btn'); if (vb){ openViewerFor(vb.dataset.id); return; }
+  const btn = e.target.closest('button'); 
+  if (btn && btn.dataset.action==='open-menu'){
+    document.querySelectorAll('.menu.open').forEach(m=>m.classList.remove('open'));
+    const menu = log.querySelector(`.menu[data-menu-for="${CSS.escape(btn.dataset.id)}"]`);
+    if (menu) menu.classList.add('open');
+    return;
+  }
+  if (btn && btn.dataset.action==='recall'){
+    document.querySelectorAll('.menu.open').forEach(m=>m.classList.remove('open'));
+    sendEvent({ type:'recall', id: btn.dataset.id });
+    return;
+  }
+  const vb = e.target.closest('.view-btn'); 
+  if (vb){ openViewerFor(vb.dataset.id); return; }
 });
-document.addEventListener('click', (e) => { const inside = e.target.closest('.menu, .kebab, .sheet'); if (!inside) document.querySelectorAll('.menu.open').forEach(m => m.classList.remove('open')); });
+document.addEventListener('click', (e) => {
+  const inside = e.target.closest('.menu, .kebab, .sheet'); 
+  if (!inside) document.querySelectorAll('.menu.open').forEach(m => m.classList.remove('open'));
+});
 </script>
 </body>
 </html>
