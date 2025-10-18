@@ -12,10 +12,10 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname  = path.dirname(__filename);
 
 const app = express();
-app.set('trust proxy', true);
+app.set('trust proxy', true);           // makes IP detection work behind proxies
 app.use(cors());
-app.use(express.json({ limit: '2mb' }));
-app.use(express.static(__dirname));
+app.use(express.json());
+app.use(express.static(__dirname));     // serves index.html and assets
 
 // ---------- Dirs ----------
 const uploadDir = path.join(__dirname, 'uploads');
@@ -23,11 +23,9 @@ const vaultDir  = path.join(__dirname, 'vault');
 for (const d of [uploadDir, vaultDir]) if (!fs.existsSync(d)) fs.mkdirSync(d);
 
 // ---------- Utils ----------
-const uid    = () => (Date.now().toString(36) + Math.random().toString(36).slice(2,8));
-const now    = () => Date.now();
-const clamp  = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
-const sha256 = (s) => crypto.createHash('sha256').update(s).digest('hex');
-
+function uid(){ return (Date.now().toString(36) + Math.random().toString(36).slice(2,8)); }
+function now(){ return Date.now(); }
+function clamp(n, lo, hi){ return Math.max(lo, Math.min(hi, n)); }
 function getClientIP(req) {
   const xf = req.headers['x-forwarded-for'];
   let ip = Array.isArray(xf) ? xf[0] : (xf || req.socket?.remoteAddress || '');
@@ -36,16 +34,31 @@ function getClientIP(req) {
   if (ip.startsWith('::ffff:')) ip = ip.replace('::ffff:','');
   return ip || 'unknown';
 }
-function getRoom(reqOrUrlString) {
+function roomFromReq(req) {
   try {
-    const u = new URL(typeof reqOrUrlString === 'string' ? reqOrUrlString : (reqOrUrlString.url || ''), 'http://x');
-    const q = (u.searchParams.get('room') || '').trim();
-    const p = u.pathname.replace(/^\/+|\/+$/g,'');
-    return q || p || 'chat';
+    const url = new URL(req.url, 'http://placeholder');
+    const p = decodeURIComponent(url.pathname || '/').replace(/^\/+|\/+$/g, '');
+    return p || 'chat';
   } catch { return 'chat'; }
 }
+function broadcast(room, payload){
+  const set = rooms.get(room);
+  if (!set) return;
+  const s = JSON.stringify(payload);
+  for (const ws of set) { try { ws.send(s); } catch {} }
+}
+function sendTo(room, predicate, payload){
+  const set = rooms.get(room);
+  if (!set) return;
+  const s = JSON.stringify(payload);
+  for (const ws of set) {
+    const m = meta.get(ws);
+    if (m && predicate(m)) { try { ws.send(s); } catch {} }
+  }
+}
+function sha256(s){ return crypto.createHash('sha256').update(s).digest('hex'); }
 
-// ---------- Multer ----------
+// ---------- Multer (25 MB) ----------
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     const toVault = (req.body?.pw && String(req.body.pw).trim().length > 0);
@@ -72,62 +85,19 @@ const upload = multer({ storage, limits: { fileSize: 25 * 1024 * 1024 } });
  *   unlockedForIP?: string | null
  * }
  */
-const roomsWS  = new Map();  // room -> Set(ws)
-const metaWS   = new Map();  // ws -> { room, ip, clientId }
-const sseRooms = new Map();  // room -> Set(res)
-const reg      = new Map();  // id -> item
+const rooms = new Map(); // room -> Set(ws)
+const meta  = new Map(); // ws -> {room, ip, clientId}
+const reg   = new Map(); // id -> item
 
-// Polling event buffer: room -> { nextSeq:number, events: Array<{seq:number, data:any}> }
-const roomBuffers = new Map();
-function roomBuf(room){
-  let b = roomBuffers.get(room);
-  if (!b) { b = { nextSeq: 1, events: [] }; roomBuffers.set(room, b); }
-  return b;
-}
-function pushEvent(room, payload){
-  // WS + SSE broadcast
-  const s = JSON.stringify(payload);
+// ---------- Static / API routes (register BEFORE catch-all) ----------
 
-  const set = roomsWS.get(room);
-  if (set) for (const ws of set) { try { ws.send(s); } catch {} }
-
-  const sseSet = sseRooms.get(room);
-  if (sseSet) for (const res of sseSet) { try { res.write(`data: ${s}\n\n`); } catch {} }
-
-  // Polling buffer
-  const buf = roomBuf(room);
-  buf.events.push({ seq: buf.nextSeq++, data: payload });
-  // trim old
-  if (buf.events.length > 1000) buf.events.splice(0, buf.events.length - 1000);
-}
-function broadcast(room, payload){ pushEvent(room, payload); }
-function sendTo(room, predicate, payload){
-  const s = JSON.stringify(payload);
-
-  // WS targeted
-  const set = roomsWS.get(room);
-  if (set) {
-    for (const ws of set) {
-      const m = metaWS.get(ws);
-      if (m && predicate(m)) { try { ws.send(s); } catch {} }
-    }
-  }
-
-  // SSE broadcast (no identity filtering)
-  const sseSet = sseRooms.get(room);
-  if (sseSet) for (const res of sseSet) { try { res.write(`data: ${s}\n\n`); } catch {} }
-
-  // Polling: just push; clients decide what to do
-  pushEvent(room, payload);
-}
-
-// ---------- Health ----------
+// health
 app.get('/health', (_req, res) => res.json({ ok:true }));
 
-// ---------- Static / public ----------
+// serve uploads (public, unprotected pre-recall)
 app.use('/uploads', express.static(uploadDir));
 
-// ---------- Viewer helpers ----------
+// owner-only (always inline-capable)
 app.get('/myfile/:id', (req, res) => {
   const id = String(req.params.id || '');
   const item = reg.get(id);
@@ -136,6 +106,8 @@ app.get('/myfile/:id', (req, res) => {
   if (ip !== item.ownerIP) return res.status(403).send('Forbidden');
   res.sendFile(path.resolve(item.privatePath));
 });
+
+// receiver-only after unlock
 app.get('/recvfile/:id', (req, res) => {
   const id = String(req.params.id || '');
   const item = reg.get(id);
@@ -144,6 +116,8 @@ app.get('/recvfile/:id', (req, res) => {
   if (ip !== item.unlockedForIP) return res.status(403).send('Forbidden');
   res.sendFile(path.resolve(item.privatePath));
 });
+
+// viewer helper: resolve best URL for requester
 app.get('/fileurl/:id', (req, res) => {
   const id = String(req.params.id || '');
   const item = reg.get(id);
@@ -162,10 +136,13 @@ app.get('/fileurl/:id', (req, res) => {
   return res.status(403).json({ ok:false, error:'Not accessible' });
 });
 
-// ---------- Upload ----------
+// upload (ttl + optional password; expects clientId)
 app.post('/upload/:room', upload.array('file', 5), (req, res) => {
   const room = (req.params.room || '').trim() || 'chat';
-
+  const set = rooms.get(room);
+  if (!set || set.size === 0 || set.size > 2) {
+    return res.status(400).json({ ok:false, error:'Room not active or full' });
+  }
   const ownerIP = getClientIP(req);
   const ownerId = (req.body?.clientId && String(req.body.clientId)) || null;
 
@@ -209,7 +186,7 @@ app.post('/upload/:room', upload.array('file', 5), (req, res) => {
   res.json({ ok:true });
 });
 
-// ---------- Unlock ----------
+// unlock
 app.post('/unlock/:id', (req, res) => {
   const id = String(req.params.id || '');
   const pwd = (req.body?.password && String(req.body.password)) || '';
@@ -220,73 +197,20 @@ app.post('/unlock/:id', (req, res) => {
   const ip = getClientIP(req);
   if (ip === item.ownerIP) return res.status(403).json({ ok:false, error:'Owner does not need to unlock' });
 
-  const ok = (sha256(item.salt + '|' + pwd) === item.pwHash);
+  const ok = (crypto.createHash('sha256').update(item.salt + '|' + pwd).digest('hex') === item.pwHash);
   if (!ok) {
     performRecall(id);
     return res.status(403).json({ ok:false, error:'Incorrect password. File was recalled.' });
   }
   item.unlockedForIP = ip;
-  broadcast(item.room, { type:'file_unlocked', id, url:`/recvfile/${id}` });
+  sendTo(item.room, (m) => m.ip === ip, { type:'file_unlocked', id, url:`/recvfile/${id}` });
   return res.json({ ok:true });
 });
 
-// ---------- SSE (fallback) ----------
-app.get('/sse', (req, res) => {
-  const room = getRoom(req);
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
-  res.flushHeaders?.();
-
-  const set = sseRooms.get(room) || new Set();
-  sseRooms.set(room, set);
-  set.add(res);
-
-  res.write(`data: ${JSON.stringify({ type:'welcome', room, yourId:null, users: [] })}\n\n`);
-
-  // keep alive
-  const ka = setInterval(() => { try { res.write(': keep-alive\n\n'); } catch {} }, 15000);
-
-  req.on('close', () => {
-    clearInterval(ka);
-    set.delete(res);
-    if (set.size === 0) sseRooms.delete(room);
-  });
+// ---------- Catch-all (register LAST) ----------
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, 'index.html'));
 });
-
-// ---------- Polling (last-resort transport) ----------
-app.get('/poll', (req, res) => {
-  const room = getRoom(req);
-  const after = parseInt(String(req.query.after ?? '0'), 10) || 0;
-  const buf = roomBuf(room);
-  const events = buf.events.filter(e => e.seq > after);
-  res.json({ ok:true, events, next: buf.nextSeq });
-});
-
-// Used by polling transport to send events
-app.post('/push', (req, res) => {
-  const { room, type } = req.body || {};
-  if (!room || !type) return res.status(400).json({ ok:false, error:'Missing room/type' });
-
-  if (type === 'chat') {
-    const { fromId, text } = req.body;
-    const id = uid(); const ts = now();
-    reg.set(id, { id, room, type:'chat', ownerIP:'poll', ownerId: fromId || null, ts, text: String(text||'').slice(0,4000), recalled:false });
-    broadcast(room, { type:'chat', id, fromId: fromId || null, text: String(text||''), ts });
-    return res.json({ ok:true });
-  }
-  if (type === 'recall') {
-    const { id } = req.body || {};
-    if (!id) return res.status(400).json({ ok:false, error:'Missing id' });
-    performRecall(String(id));
-    return res.json({ ok:true });
-  }
-  return res.status(400).json({ ok:false, error:'Unsupported type' });
-});
-
-// ---------- App ----------
-app.get('/health', (_req,res)=>res.json({ok:true}));
-app.get('*', (_req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 
 // ---------- Recall helpers ----------
 function moveFileToVault(item){
@@ -308,10 +232,10 @@ function performRecall(id){
   if (item.type === 'file') moveFileToVault(item);
   item.unlockedForIP = null;
 
-  broadcast(item.room, { type:'recalled', id, sys:'This item was recalled by the sender.' });
+  sendTo(item.room, (m) => m.clientId !== item.ownerId, { type:'recalled', id, sys:'This item was recalled by the sender.' });
   const ownerNote = { type:'recalled_owner', id, sys:'You recalled this. The other person can no longer see it.' };
   if (item.type === 'file' && item.privatePath) ownerNote.newUrl = `/myfile/${id}`;
-  broadcast(item.room, ownerNote);
+  sendTo(item.room, (m) => m.clientId === item.ownerId, ownerNote);
 }
 function scheduleAutoRecall(item){
   if (!item.expiresAt) return;
@@ -319,67 +243,70 @@ function scheduleAutoRecall(item){
   item.timer = setTimeout(() => performRecall(item.id), delay);
 }
 
-// ---------- Server + WebSocket ----------
+// ---------- WebSockets ----------
 const server = http.createServer(app);
-const wss = new WebSocketServer({ server, path: '/ws' });
+const wss = new WebSocketServer({ server });
 
 wss.on('connection', (ws, req) => {
-  const room = getRoom(req.url);
+  const room = roomFromReq(req);
   const ip = getClientIP(req);
   const clientId = uid();
 
-  const set = roomsWS.get(room) || new Set();
+  const set = rooms.get(room) || new Set();
   if (set.size >= 2) {
     ws.send(JSON.stringify({ type:'room_full', message:'This private room already has two people.' }));
     ws.close(4001, 'room full');
     return;
   }
   set.add(ws);
-  roomsWS.set(room, set);
-  metaWS.set(ws, { room, ip, clientId });
+  rooms.set(room, set);
+  meta.set(ws, { room, ip, clientId });
 
-  console.log(`[WS] connected room=${room} id=${clientId} ip=${ip} size=${set.size}`);
-  ws.send(JSON.stringify({ type:'welcome', room, yourId: clientId, users: [...set].map(sock => metaWS.get(sock)?.clientId) }));
-  const users = [...set].map(sock => metaWS.get(sock)?.clientId);
-  for (const sock of set) { try { sock.send(JSON.stringify({ type:'presence', users })); } catch {} }
+  console.log(`[WS] connected: room=${room} id=${clientId} ip=${ip} size=${set.size}`);
+
+  ws.send(JSON.stringify({ type:'welcome', room, yourId: clientId, users: [...set].map(sock => meta.get(sock)?.clientId) }));
+  broadcast(room, { type:'presence', users: [...set].map(sock => meta.get(sock)?.clientId) });
 
   ws.on('message', (buf) => {
     let data; try { data = JSON.parse(buf); } catch { return; }
-    const m = metaWS.get(ws); if (!m) return;
+    const m = meta.get(ws); if (!m) return;
 
     if (data.type === 'chat') {
-      const id = uid(); const ts = now();
-      reg.set(id, { id, room, type:'chat', ownerIP: m.ip, ownerId: m.clientId, ts, text: String(data.text||'').slice(0,4000), recalled:false });
-      broadcast(room, { type:'chat', id, fromId: m.clientId, text: String(data.text||''), ts });
+      const id = uid();
+      const text = String(data.text || '').slice(0, 4000);
+      const ts = Date.now();
+      reg.set(id, { id, room, type:'chat', ownerIP: m.ip, ownerId: m.clientId, ts, text, recalled:false });
+      broadcast(room, { type:'chat', id, fromId: m.clientId, text, ts });
       return;
     }
+
     if (data.type === 'recall' && data.id) {
-      const item = reg.get(String(data.id));
+      const id = String(data.id);
+      const item = reg.get(id);
       if (!item || item.room !== room) return;
-      if (item.ownerId !== m.clientId) { ws.send(JSON.stringify({ type:'error', message:'Only the sender can recall this item.' })); return; }
-      performRecall(item.id); return;
+      if (item.ownerId !== m.clientId) {
+        ws.send(JSON.stringify({ type:'error', message:'Only the sender can recall this item.' }));
+        return;
+      }
+      performRecall(id);
+      return;
     }
   });
 
   ws.on('close', () => {
-    metaWS.delete(ws);
-    const s = roomsWS.get(room);
+    const m = meta.get(ws);
+    meta.delete(ws);
+    const s = rooms.get(room);
     if (s) {
       s.delete(ws);
-      if (s.size === 0) roomsWS.delete(room);
-      else {
-        const users = [...s].map(sock => metaWS.get(sock)?.clientId);
-        for (const sock of s) { try { sock.send(JSON.stringify({ type:'presence', users })); } catch {} }
-      }
+      if (s.size === 0) rooms.delete(room);
+      else broadcast(room, { type:'presence', users: [...s].map(sock => meta.get(sock)?.clientId) });
     }
-    console.log(`[WS] closed room=${room} id=${clientId}`);
+    console.log(`[WS] closed: room=${room} id=${clientId}`);
   });
 });
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-  console.log('Listening on http://localhost:'+PORT);
-  console.log('WebSocket:  ws://localhost:'+PORT+'/ws?room=<room>');
-  console.log('SSE:        GET  /sse?room=<room>');
-  console.log('Polling:    GET  /poll?room=<room>&after=<seq>');
+  console.log('Server listening on http://localhost:'+PORT);
 });
