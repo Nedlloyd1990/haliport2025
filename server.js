@@ -1,3 +1,4 @@
+// server.js
 import express from 'express';
 import http from 'http';
 import path from 'path';
@@ -129,7 +130,7 @@ app.get('/fileurl/:id', (req, res) => {
   // Owner: always inline (private path if exists), else public
   if (ip === item.ownerIP) {
     if (item.privatePath) return res.json({ ok:true, id, name:item.file.name, mime:item.file.mime, url:`/myfile/${id}`, inlineOnly: true });
-    if (item.filePath)    return res.json({ ok:true, id, name:item.file.name, mime:item.file.mime, url:`/uploads/${path.basename(item.filePath)}`, inlineOnly: !item.filePath });
+    if (item.filePath)    return res.json({ ok:true, id, name:item.file.name, mime:item.file.mime, url:`/uploads/${path.basename(item.filePath)}`, inlineOnly: false });
   }
 
   // If not protected and not recalled and downloads are allowed, public URL
@@ -172,12 +173,16 @@ app.post('/upload/:room', upload.array('file', 5), (req, res) => {
     const isProtected = !!pwRaw;
     const keptInVault = isProtected || noDownload;
 
+    const absPath = path.join(keptInVault ? vaultDir : uploadDir, f.filename || path.basename(f.path));
+    // Make sure we have an absolute path (Render environment sometimes gives only filename)
+    const filePath = keptInVault ? null : absPath;
+    const privatePath = keptInVault ? absPath : null;
+
     const record = {
       id, room, type:'file', ownerIP, ownerId, ts,
-      file: { name: f.originalname, savedAs: path.basename(f.filename || f.path), size: f.size, mime: f.mimetype },
-      // If view-only or password: keep private; else public
-      filePath: keptInVault ? null : f.path,
-      privatePath: keptInVault ? f.path : null,
+      file: { name: f.originalname, savedAs: path.basename(absPath), size: f.size, mime: f.mimetype },
+      filePath,
+      privatePath,
       recalled:false,
       protected: isProtected,
       salt:null, pwHash:null,
@@ -226,7 +231,7 @@ app.post('/unlock/:id', (req, res) => {
 
   const ok = (crypto.createHash('sha256').update(item.salt + '|' + pwd).digest('hex') === item.pwHash);
   if (!ok) {
-    performRecall(id); // <-- recall on incorrect password
+    performRecall(id); // recall on incorrect password
     return res.status(403).json({ ok:false, error:'Incorrect password. File was recalled.' });
   }
   item.unlockedForIP = ip;
@@ -273,9 +278,6 @@ function scheduleAutoRecall(item){
 // ---------- WebSockets ----------
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
-
-const rooms = new Map();
-const meta  = new Map();
 
 wss.on('connection', (ws, req) => {
   const room = roomFromReq(req);
