@@ -77,18 +77,30 @@ const metaWS   = new Map();  // ws -> { room, ip, clientId }
 const sseRooms = new Map();  // room -> Set(res)
 const reg      = new Map();  // id -> item
 
-// ---------- Helpers to notify clients ----------
-function broadcast(room, payload){
+// Polling event buffer: room -> { nextSeq:number, events: Array<{seq:number, data:any}> }
+const roomBuffers = new Map();
+function roomBuf(room){
+  let b = roomBuffers.get(room);
+  if (!b) { b = { nextSeq: 1, events: [] }; roomBuffers.set(room, b); }
+  return b;
+}
+function pushEvent(room, payload){
+  // WS + SSE broadcast
   const s = JSON.stringify(payload);
 
-  // WS
   const set = roomsWS.get(room);
   if (set) for (const ws of set) { try { ws.send(s); } catch {} }
 
-  // SSE
   const sseSet = sseRooms.get(room);
   if (sseSet) for (const res of sseSet) { try { res.write(`data: ${s}\n\n`); } catch {} }
+
+  // Polling buffer
+  const buf = roomBuf(room);
+  buf.events.push({ seq: buf.nextSeq++, data: payload });
+  // trim old
+  if (buf.events.length > 1000) buf.events.splice(0, buf.events.length - 1000);
 }
+function broadcast(room, payload){ pushEvent(room, payload); }
 function sendTo(room, predicate, payload){
   const s = JSON.stringify(payload);
 
@@ -101,9 +113,12 @@ function sendTo(room, predicate, payload){
     }
   }
 
-  // SSE: no per-connection identity, we broadcast and let client ignore when not relevant
+  // SSE broadcast (no identity filtering)
   const sseSet = sseRooms.get(room);
   if (sseSet) for (const res of sseSet) { try { res.write(`data: ${s}\n\n`); } catch {} }
+
+  // Polling: just push; clients decide what to do
+  pushEvent(room, payload);
 }
 
 // ---------- Health ----------
@@ -112,7 +127,7 @@ app.get('/health', (_req, res) => res.json({ ok:true }));
 // ---------- Static / public ----------
 app.use('/uploads', express.static(uploadDir));
 
-// ---------- Viewer helpers (secure URLs per role/IP) ----------
+// ---------- Viewer helpers ----------
 app.get('/myfile/:id', (req, res) => {
   const id = String(req.params.id || '');
   const item = reg.get(id);
@@ -147,11 +162,10 @@ app.get('/fileurl/:id', (req, res) => {
   return res.status(403).json({ ok:false, error:'Not accessible' });
 });
 
-// ---------- Upload (works for WS & SSE users) ----------
+// ---------- Upload ----------
 app.post('/upload/:room', upload.array('file', 5), (req, res) => {
   const room = (req.params.room || '').trim() || 'chat';
 
-  // proceed even if nobody is currently connected; messages will deliver when someone joins
   const ownerIP = getClientIP(req);
   const ownerId = (req.body?.clientId && String(req.body.clientId)) || null;
 
@@ -195,7 +209,7 @@ app.post('/upload/:room', upload.array('file', 5), (req, res) => {
   res.json({ ok:true });
 });
 
-// ---------- Unlock (password-protected files) ----------
+// ---------- Unlock ----------
 app.post('/unlock/:id', (req, res) => {
   const id = String(req.params.id || '');
   const pwd = (req.body?.password && String(req.body.password)) || '';
@@ -228,10 +242,9 @@ app.get('/sse', (req, res) => {
   sseRooms.set(room, set);
   set.add(res);
 
-  // initial hello (no identity in SSE mode)
   res.write(`data: ${JSON.stringify({ type:'welcome', room, yourId:null, users: [] })}\n\n`);
 
-  // keep-alive so proxies don't cut the stream
+  // keep alive
   const ka = setInterval(() => { try { res.write(': keep-alive\n\n'); } catch {} }, 15000);
 
   req.on('close', () => {
@@ -241,7 +254,16 @@ app.get('/sse', (req, res) => {
   });
 });
 
-// POST /push — used by the browser in SSE mode to send chat/recall
+// ---------- Polling (last-resort transport) ----------
+app.get('/poll', (req, res) => {
+  const room = getRoom(req);
+  const after = parseInt(String(req.query.after ?? '0'), 10) || 0;
+  const buf = roomBuf(room);
+  const events = buf.events.filter(e => e.seq > after);
+  res.json({ ok:true, events, next: buf.nextSeq });
+});
+
+// Used by polling transport to send events
 app.post('/push', (req, res) => {
   const { room, type } = req.body || {};
   if (!room || !type) return res.status(400).json({ ok:false, error:'Missing room/type' });
@@ -249,22 +271,21 @@ app.post('/push', (req, res) => {
   if (type === 'chat') {
     const { fromId, text } = req.body;
     const id = uid(); const ts = now();
-    reg.set(id, { id, room, type:'chat', ownerIP:'sse', ownerId: fromId || null, ts, text: String(text||'').slice(0,4000), recalled:false });
+    reg.set(id, { id, room, type:'chat', ownerIP:'poll', ownerId: fromId || null, ts, text: String(text||'').slice(0,4000), recalled:false });
     broadcast(room, { type:'chat', id, fromId: fromId || null, text: String(text||''), ts });
     return res.json({ ok:true });
   }
-
   if (type === 'recall') {
     const { id } = req.body || {};
     if (!id) return res.status(400).json({ ok:false, error:'Missing id' });
     performRecall(String(id));
     return res.json({ ok:true });
   }
-
   return res.status(400).json({ ok:false, error:'Unsupported type' });
 });
 
 // ---------- App ----------
+app.get('/health', (_req,res)=>res.json({ok:true}));
 app.get('*', (_req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 
 // ---------- Recall helpers ----------
@@ -359,5 +380,6 @@ const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
   console.log('Listening on http://localhost:'+PORT);
   console.log('WebSocket:  ws://localhost:'+PORT+'/ws?room=<room>');
-  console.log('SSE (fallback): GET http://localhost:'+PORT+'/sse?room=<room>');
+  console.log('SSE:        GET  /sse?room=<room>');
+  console.log('Polling:    GET  /poll?room=<room>&after=<seq>');
 });
