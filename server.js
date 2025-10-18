@@ -12,9 +12,10 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname  = path.dirname(__filename);
 
 const app = express();
+app.set('trust proxy', true);           // makes IP detection work behind proxies
 app.use(cors());
 app.use(express.json());
-app.use(express.static(__dirname));
+app.use(express.static(__dirname));     // serves index.html and assets
 
 // ---------- Dirs ----------
 const uploadDir = path.join(__dirname, 'uploads');
@@ -70,7 +71,7 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage, limits: { fileSize: 25 * 1024 * 1024 } });
 
-// ---------- Rooms & Registry ----------
+// ---------- State ----------
 /**
  * reg item:
  * { id, room, type:'chat'|'file', ownerIP, ownerId, ts,
@@ -79,11 +80,8 @@ const upload = multer({ storage, limits: { fileSize: 25 * 1024 * 1024 } });
  *   filePath?: string | null,   // public (uploads)
  *   privatePath?: string | null,// vault
  *   recalled:false,
- *   expiresAt?: number,
- *   timer?: Timeout,
- *   protected?: boolean,
- *   salt?: string,
- *   pwHash?: string,
+ *   expiresAt?: number, timer?: Timeout,
+ *   protected?: boolean, salt?: string, pwHash?: string,
  *   unlockedForIP?: string | null
  * }
  */
@@ -91,30 +89,25 @@ const rooms = new Map(); // room -> Set(ws)
 const meta  = new Map(); // ws -> {room, ip, clientId}
 const reg   = new Map(); // id -> item
 
-// Serve index for any GET (room = path)
-app.get('*', (req, res, next) => {
-  if (req.method !== 'GET') return next();
-  res.sendFile(path.join(__dirname, 'index.html'));
-});
+// ---------- Static / API routes (register BEFORE catch-all) ----------
 
-const server = http.createServer(app);
-const wss = new WebSocketServer({ server });
+// health
+app.get('/health', (_req, res) => res.json({ ok:true }));
 
-// Static serving for public uploads
+// serve uploads (public, unprotected pre-recall)
 app.use('/uploads', express.static(uploadDir));
 
-// Owner-only serve
+// owner-only (always inline-capable)
 app.get('/myfile/:id', (req, res) => {
   const id = String(req.params.id || '');
   const item = reg.get(id);
   if (!item || item.type !== 'file' || !item.privatePath) return res.status(404).end();
   const ip = getClientIP(req);
-  // Owner identified by IP (ownerId is for WS direction; HTTP uses IP)
   if (ip !== item.ownerIP) return res.status(403).send('Forbidden');
   res.sendFile(path.resolve(item.privatePath));
 });
 
-// Receiver serve after unlock
+// receiver-only after unlock
 app.get('/recvfile/:id', (req, res) => {
   const id = String(req.params.id || '');
   const item = reg.get(id);
@@ -124,45 +117,111 @@ app.get('/recvfile/:id', (req, res) => {
   res.sendFile(path.resolve(item.privatePath));
 });
 
-// Endpoint the viewer uses to get the correct URL for THIS requester
+// viewer helper: resolve best URL for requester
 app.get('/fileurl/:id', (req, res) => {
   const id = String(req.params.id || '');
   const item = reg.get(id);
   if (!item || item.type !== 'file') return res.status(404).json({ ok:false, error:'Not found' });
   const ip = getClientIP(req);
 
-  // Owner can always view in-vault file
   if (ip === item.ownerIP && item.privatePath) {
     return res.json({ ok:true, id, name:item.file.name, mime:item.file.mime, url:`/myfile/${id}` });
   }
-
-  // Unprotected, not recalled -> public
   if (!item.protected && !item.recalled && item.filePath) {
     return res.json({ ok:true, id, name:item.file.name, mime:item.file.mime, url:`/uploads/${path.basename(item.filePath)}` });
   }
-
-  // Protected and unlocked for this ip
   if (item.protected && item.unlockedForIP && ip === item.unlockedForIP && item.privatePath) {
     return res.json({ ok:true, id, name:item.file.name, mime:item.file.mime, url:`/recvfile/${id}` });
   }
-
   return res.status(403).json({ ok:false, error:'Not accessible' });
+});
+
+// upload (ttl + optional password; expects clientId)
+app.post('/upload/:room', upload.array('file', 5), (req, res) => {
+  const room = (req.params.room || '').trim() || 'chat';
+  const set = rooms.get(room);
+  if (!set || set.size === 0 || set.size > 2) {
+    return res.status(400).json({ ok:false, error:'Room not active or full' });
+  }
+  const ownerIP = getClientIP(req);
+  const ownerId = (req.body?.clientId && String(req.body.clientId)) || null;
+
+  const ttlSec = clamp(parseInt((req.body?.ttl ?? '0'), 10) || 0, 0, 31*24*3600);
+  const pwRaw  = (req.body?.pw && String(req.body.pw).trim()) || '';
+
+  (req.files || []).forEach(f => {
+    const id = uid();
+    const ts = now();
+    const record = {
+      id, room, type:'file', ownerIP, ownerId, ts,
+      file: { name: f.originalname, savedAs: path.basename(f.filename || f.path), size: f.size, mime: f.mimetype },
+      filePath: pwRaw ? null : f.path,
+      privatePath: pwRaw ? f.path : null,
+      recalled:false,
+      protected: !!pwRaw,
+      salt:null, pwHash:null,
+      unlockedForIP:null
+    };
+    if (pwRaw) { record.salt = uid(); record.pwHash = sha256(record.salt + '|' + pwRaw); }
+    if (ttlSec > 0) { record.expiresAt = ts + ttlSec*1000; scheduleAutoRecall(record); }
+    reg.set(id, record);
+
+    const payload = {
+      type:'file', id, fromId: ownerId, ts,
+      file: {
+        name: record.file.name, savedAs: record.file.savedAs, size: record.file.size, mime: record.file.mime,
+        url: pwRaw ? null : `/uploads/${path.basename(record.filePath)}`,
+        protected: !!pwRaw
+      }
+    };
+    if (record.expiresAt) payload.expiresAt = record.expiresAt;
+
+    broadcast(room, payload);
+
+    const ownerAug = { type:'file_owner', id };
+    if (record.privatePath) ownerAug.ownerUrl = `/myfile/${id}`;
+    sendTo(room, (m) => m.clientId === ownerId, ownerAug);
+  });
+
+  res.json({ ok:true });
+});
+
+// unlock
+app.post('/unlock/:id', (req, res) => {
+  const id = String(req.params.id || '');
+  const pwd = (req.body?.password && String(req.body.password)) || '';
+  const item = reg.get(id);
+  if (!item || item.type !== 'file' || !item.protected || item.recalled) {
+    return res.status(400).json({ ok:false, error:'Invalid item' });
+  }
+  const ip = getClientIP(req);
+  if (ip === item.ownerIP) return res.status(403).json({ ok:false, error:'Owner does not need to unlock' });
+
+  const ok = (crypto.createHash('sha256').update(item.salt + '|' + pwd).digest('hex') === item.pwHash);
+  if (!ok) {
+    performRecall(id);
+    return res.status(403).json({ ok:false, error:'Incorrect password. File was recalled.' });
+  }
+  item.unlockedForIP = ip;
+  sendTo(item.room, (m) => m.ip === ip, { type:'file_unlocked', id, url:`/recvfile/${id}` });
+  return res.json({ ok:true });
+});
+
+// ---------- Catch-all (register LAST) ----------
+app.get('*', (req, res) => {
+  res.sendFile(path.join(__dirname, 'index.html'));
 });
 
 // ---------- Recall helpers ----------
 function moveFileToVault(item){
-  if (item.type !== 'file') return;
-  if (item.privatePath) return;
-  if (!item.filePath) return;
+  if (item.type !== 'file' || item.privatePath || !item.filePath) return;
   try {
     const dest = path.join(vaultDir, path.basename(item.filePath));
     fs.renameSync(item.filePath, dest);
-    item.privatePath = dest;
-    item.filePath = null;
+    item.privatePath = dest; item.filePath = null;
   } catch {
     try { fs.unlinkSync(item.filePath); } catch {}
-    item.privatePath = null;
-    item.filePath = null;
+    item.privatePath = null; item.filePath = null;
   }
 }
 function performRecall(id){
@@ -173,9 +232,7 @@ function performRecall(id){
   if (item.type === 'file') moveFileToVault(item);
   item.unlockedForIP = null;
 
-  // notify receiver(s)
   sendTo(item.room, (m) => m.clientId !== item.ownerId, { type:'recalled', id, sys:'This item was recalled by the sender.' });
-  // notify owner
   const ownerNote = { type:'recalled_owner', id, sys:'You recalled this. The other person can no longer see it.' };
   if (item.type === 'file' && item.privatePath) ownerNote.newUrl = `/myfile/${id}`;
   sendTo(item.room, (m) => m.clientId === item.ownerId, ownerNote);
@@ -187,6 +244,9 @@ function scheduleAutoRecall(item){
 }
 
 // ---------- WebSockets ----------
+const server = http.createServer(app);
+const wss = new WebSocketServer({ server });
+
 wss.on('connection', (ws, req) => {
   const room = roomFromReq(req);
   const ip = getClientIP(req);
@@ -198,10 +258,11 @@ wss.on('connection', (ws, req) => {
     ws.close(4001, 'room full');
     return;
   }
-
   set.add(ws);
   rooms.set(room, set);
   meta.set(ws, { room, ip, clientId });
+
+  console.log(`[WS] connected: room=${room} id=${clientId} ip=${ip} size=${set.size}`);
 
   ws.send(JSON.stringify({ type:'welcome', room, yourId: clientId, users: [...set].map(sock => meta.get(sock)?.clientId) }));
   broadcast(room, { type:'presence', users: [...set].map(sock => meta.get(sock)?.clientId) });
@@ -213,7 +274,7 @@ wss.on('connection', (ws, req) => {
     if (data.type === 'chat') {
       const id = uid();
       const text = String(data.text || '').slice(0, 4000);
-      const ts = now();
+      const ts = Date.now();
       reg.set(id, { id, room, type:'chat', ownerIP: m.ip, ownerId: m.clientId, ts, text, recalled:false });
       broadcast(room, { type:'chat', id, fromId: m.clientId, text, ts });
       return;
@@ -233,98 +294,19 @@ wss.on('connection', (ws, req) => {
   });
 
   ws.on('close', () => {
+    const m = meta.get(ws);
     meta.delete(ws);
     const s = rooms.get(room);
-    if (!s) return;
-    s.delete(ws);
-    if (s.size === 0) rooms.delete(room);
-    else broadcast(room, { type:'presence', users: [...s].map(sock => meta.get(sock)?.clientId) });
+    if (s) {
+      s.delete(ws);
+      if (s.size === 0) rooms.delete(room);
+      else broadcast(room, { type:'presence', users: [...s].map(sock => meta.get(sock)?.clientId) });
+    }
+    console.log(`[WS] closed: room=${room} id=${clientId}`);
   });
-});
-
-// ---------- Upload (TTL + optional password) ----------
-// Expect a hidden field clientId from the browser so we can set fromId on file events.
-app.post('/upload/:room', upload.array('file', 5), (req, res) => {
-  const room = (req.params.room || '').trim() || 'chat';
-  const set = rooms.get(room);
-  if (!set || set.size === 0 || set.size > 2) {
-    return res.status(400).json({ ok:false, error:'Room not active or full' });
-  }
-  const ownerIP = getClientIP(req);
-  const ownerId = (req.body?.clientId && String(req.body.clientId)) || null;
-
-  const ttlSec  = clamp(parseInt((req.body?.ttl ?? '0'), 10) || 0, 0, 31*24*3600);
-  const pwRaw   = (req.body?.pw && String(req.body.pw).trim()) || '';
-
-  (req.files || []).forEach(f => {
-    const id = uid();
-    const ts = now();
-
-    const record = {
-      id, room, type:'file', ownerIP, ownerId, ts,
-      file: { name: f.originalname, savedAs: path.basename(f.filename || f.path), size: f.size, mime: f.mimetype },
-      filePath: pwRaw ? null : f.path,
-      privatePath: pwRaw ? f.path : null,
-      recalled:false,
-      protected: !!pwRaw,
-      salt: null, pwHash: null,
-      unlockedForIP: null
-    };
-
-    if (pwRaw) { record.salt = uid(); record.pwHash = sha256(record.salt + '|' + pwRaw); }
-    if (ttlSec > 0) { record.expiresAt = ts + (ttlSec * 1000); scheduleAutoRecall(record); }
-
-    reg.set(id, record);
-
-    // Note: include fromId so clients can side-align correctly
-    const payload = {
-      type:'file', id, fromId: ownerId, ts,
-      file: {
-        name: record.file.name,
-        savedAs: record.file.savedAs,
-        size: record.file.size,
-        mime: record.file.mime,
-        url: pwRaw ? null : `/uploads/${path.basename(record.filePath)}`,
-        protected: !!pwRaw
-      }
-    };
-    if (record.expiresAt) payload.expiresAt = record.expiresAt;
-
-    broadcast(room, payload);
-
-    // Owner augmentation (owner-only URL for protected & for recalled later)
-    const ownerAug = { type:'file_owner', id };
-    if (record.privatePath) ownerAug.ownerUrl = `/myfile/${id}`;
-    sendTo(room, (m) => m.clientId === ownerId, ownerAug);
-  });
-
-  res.json({ ok:true });
-});
-
-// ---------- Unlock (receiver) ----------
-app.post('/unlock/:id', (req, res) => {
-  const id = String(req.params.id || '');
-  const pwd = (req.body?.password && String(req.body.password)) || '';
-  const item = reg.get(id);
-  if (!item || item.type !== 'file' || !item.protected || item.recalled) {
-    return res.status(400).json({ ok:false, error:'Invalid item' });
-  }
-  const ip = getClientIP(req);
-  if (ip === item.ownerIP) return res.status(403).json({ ok:false, error:'Owner does not need to unlock' });
-
-  const ok = (crypto.createHash('sha256').update(item.salt + '|' + pwd).digest('hex') === item.pwHash);
-  if (!ok) {
-    performRecall(id); // wrong password => recall
-    return res.status(403).json({ ok:false, error:'Incorrect password. File was recalled.' });
-  }
-
-  item.unlockedForIP = ip;
-  sendTo(item.room, (m) => m.ip === ip, { type:'file_unlocked', id, url: `/recvfile/${id}` });
-  return res.json({ ok:true });
 });
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-  console.log('1:1 chat with correct side alignment + non-auto preview is listening on', PORT);
-  console.log('Open http://localhost:'+PORT+'/your-room');
+  console.log('Server listening on http://localhost:'+PORT);
 });
