@@ -23,9 +23,9 @@ const vaultDir  = path.join(__dirname, 'vault');
 for (const d of [uploadDir, vaultDir]) if (!fs.existsSync(d)) fs.mkdirSync(d);
 
 // ---------- Utils ----------
-const uid = () => (Date.now().toString(36) + Math.random().toString(36).slice(2,8));
-const now = () => Date.now();
-const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
+const uid    = () => (Date.now().toString(36) + Math.random().toString(36).slice(2,8));
+const now    = () => Date.now();
+const clamp  = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
 const sha256 = (s) => crypto.createHash('sha256').update(s).digest('hex');
 
 function getClientIP(req) {
@@ -72,31 +72,27 @@ const upload = multer({ storage, limits: { fileSize: 25 * 1024 * 1024 } });
  *   unlockedForIP?: string | null
  * }
  */
-const roomsWS = new Map();  // room -> Set(ws)
-const metaWS  = new Map();  // ws -> {room, ip, clientId}
-const sseRooms = new Map(); // room -> Set(res)
-const reg   = new Map();    // id -> item
+const roomsWS  = new Map();  // room -> Set(ws)
+const metaWS   = new Map();  // ws -> { room, ip, clientId }
+const sseRooms = new Map();  // room -> Set(res)
+const reg      = new Map();  // id -> item
 
-// ---------- Small helpers ----------
+// ---------- Helpers to notify clients ----------
 function broadcast(room, payload){
   const s = JSON.stringify(payload);
 
-  // WS clients
+  // WS
   const set = roomsWS.get(room);
-  if (set) { for (const ws of set) { try { ws.send(s); } catch {} } }
+  if (set) for (const ws of set) { try { ws.send(s); } catch {} }
 
-  // SSE clients
+  // SSE
   const sseSet = sseRooms.get(room);
-  if (sseSet) {
-    for (const res of sseSet) {
-      try { res.write(`data: ${s}\n\n`); } catch {}
-    }
-  }
+  if (sseSet) for (const res of sseSet) { try { res.write(`data: ${s}\n\n`); } catch {} }
 }
 function sendTo(room, predicate, payload){
   const s = JSON.stringify(payload);
 
-  // WS
+  // WS targeted
   const set = roomsWS.get(room);
   if (set) {
     for (const ws of set) {
@@ -105,22 +101,18 @@ function sendTo(room, predicate, payload){
     }
   }
 
-  // SSE: no identity per connection, so we can't filter here; we’ll broadcast and let client ignore if not relevant
+  // SSE: no per-connection identity, we broadcast and let client ignore when not relevant
   const sseSet = sseRooms.get(room);
-  if (sseSet) {
-    for (const res of sseSet) {
-      try { res.write(`data: ${s}\n\n`); } catch {}
-    }
-  }
+  if (sseSet) for (const res of sseSet) { try { res.write(`data: ${s}\n\n`); } catch {} }
 }
 
 // ---------- Health ----------
 app.get('/health', (_req, res) => res.json({ ok:true }));
 
-// ---------- Static / API (before catch-all) ----------
+// ---------- Static / public ----------
 app.use('/uploads', express.static(uploadDir));
 
-// viewer helpers
+// ---------- Viewer helpers (secure URLs per role/IP) ----------
 app.get('/myfile/:id', (req, res) => {
   const id = String(req.params.id || '');
   const item = reg.get(id);
@@ -129,7 +121,6 @@ app.get('/myfile/:id', (req, res) => {
   if (ip !== item.ownerIP) return res.status(403).send('Forbidden');
   res.sendFile(path.resolve(item.privatePath));
 });
-
 app.get('/recvfile/:id', (req, res) => {
   const id = String(req.params.id || '');
   const item = reg.get(id);
@@ -138,7 +129,6 @@ app.get('/recvfile/:id', (req, res) => {
   if (ip !== item.unlockedForIP) return res.status(403).send('Forbidden');
   res.sendFile(path.resolve(item.privatePath));
 });
-
 app.get('/fileurl/:id', (req, res) => {
   const id = String(req.params.id || '');
   const item = reg.get(id);
@@ -157,17 +147,11 @@ app.get('/fileurl/:id', (req, res) => {
   return res.status(403).json({ ok:false, error:'Not accessible' });
 });
 
-// Upload (works whether WS or SSE is used on the client)
+// ---------- Upload (works for WS & SSE users) ----------
 app.post('/upload/:room', upload.array('file', 5), (req, res) => {
   const room = (req.params.room || '').trim() || 'chat';
 
-  // allow if either WS or SSE has someone connected
-  const hasAudience = (roomsWS.get(room)?.size || 0) + (sseRooms.get(room)?.size || 0);
-  if (!hasAudience) {
-    // still allow owner to place file; but warn: we'll deliver when someone connects
-    // (to keep behavior simple, we'll proceed)
-  }
-
+  // proceed even if nobody is currently connected; messages will deliver when someone joins
   const ownerIP = getClientIP(req);
   const ownerId = (req.body?.clientId && String(req.body.clientId)) || null;
 
@@ -205,14 +189,13 @@ app.post('/upload/:room', upload.array('file', 5), (req, res) => {
 
     const ownerAug = { type:'file_owner', id };
     if (record.privatePath) ownerAug.ownerUrl = `/myfile/${id}`;
-    // owner-only message (best-effort on WS; SSE will also receive but owner checks on client)
     sendTo(room, (m) => m.clientId === ownerId, ownerAug);
   });
 
   res.json({ ok:true });
 });
 
-// Unlock
+// ---------- Unlock (password-protected files) ----------
 app.post('/unlock/:id', (req, res) => {
   const id = String(req.params.id || '');
   const pwd = (req.body?.password && String(req.body.password)) || '';
@@ -233,7 +216,7 @@ app.post('/unlock/:id', (req, res) => {
   return res.json({ ok:true });
 });
 
-// ---------- SSE endpoints (fallback receive channel) ----------
+// ---------- SSE (fallback) ----------
 app.get('/sse', (req, res) => {
   const room = getRoom(req);
   res.setHeader('Content-Type', 'text/event-stream');
@@ -245,16 +228,20 @@ app.get('/sse', (req, res) => {
   sseRooms.set(room, set);
   set.add(res);
 
-  // greet
+  // initial hello (no identity in SSE mode)
   res.write(`data: ${JSON.stringify({ type:'welcome', room, yourId:null, users: [] })}\n\n`);
 
+  // keep-alive so proxies don't cut the stream
+  const ka = setInterval(() => { try { res.write(': keep-alive\n\n'); } catch {} }, 15000);
+
   req.on('close', () => {
+    clearInterval(ka);
     set.delete(res);
     if (set.size === 0) sseRooms.delete(room);
   });
 });
 
-// POST /push — send chat/recall via HTTP (used when in SSE mode)
+// POST /push — used by the browser in SSE mode to send chat/recall
 app.post('/push', (req, res) => {
   const { room, type } = req.body || {};
   if (!room || !type) return res.status(400).json({ ok:false, error:'Missing room/type' });
@@ -277,7 +264,7 @@ app.post('/push', (req, res) => {
   return res.status(400).json({ ok:false, error:'Unsupported type' });
 });
 
-// ---------- Catch-all (serve app) ----------
+// ---------- App ----------
 app.get('*', (_req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 
 // ---------- Recall helpers ----------
@@ -311,7 +298,7 @@ function scheduleAutoRecall(item){
   item.timer = setTimeout(() => performRecall(item.id), delay);
 }
 
-// ---------- Server + WebSocket at /ws ----------
+// ---------- Server + WebSocket ----------
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server, path: '/ws' });
 
