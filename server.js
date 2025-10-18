@@ -12,10 +12,10 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname  = path.dirname(__filename);
 
 const app = express();
-app.set('trust proxy', true);           // makes IP detection work behind proxies
+app.set('trust proxy', true);
 app.use(cors());
 app.use(express.json());
-app.use(express.static(__dirname));     // serves index.html and assets
+app.use(express.static(__dirname));
 
 // ---------- Dirs ----------
 const uploadDir = path.join(__dirname, 'uploads');
@@ -23,9 +23,11 @@ const vaultDir  = path.join(__dirname, 'vault');
 for (const d of [uploadDir, vaultDir]) if (!fs.existsSync(d)) fs.mkdirSync(d);
 
 // ---------- Utils ----------
-function uid(){ return (Date.now().toString(36) + Math.random().toString(36).slice(2,8)); }
-function now(){ return Date.now(); }
-function clamp(n, lo, hi){ return Math.max(lo, Math.min(hi, n)); }
+const uid = () => (Date.now().toString(36) + Math.random().toString(36).slice(2,8));
+const now = () => Date.now();
+const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
+const sha256 = (s) => crypto.createHash('sha256').update(s).digest('hex');
+
 function getClientIP(req) {
   const xf = req.headers['x-forwarded-for'];
   let ip = Array.isArray(xf) ? xf[0] : (xf || req.socket?.remoteAddress || '');
@@ -34,31 +36,18 @@ function getClientIP(req) {
   if (ip.startsWith('::ffff:')) ip = ip.replace('::ffff:','');
   return ip || 'unknown';
 }
-function roomFromReq(req) {
+function getRoom(reqOrUrlString) {
   try {
-    const url = new URL(req.url, 'http://placeholder');
-    const p = decodeURIComponent(url.pathname || '/').replace(/^\/+|\/+$/g, '');
-    return p || 'chat';
+    // Works for both HTTP requests and raw URL strings from the WS upgrade
+    const u = new URL(typeof reqOrUrlString === 'string' ? reqOrUrlString : (reqOrUrlString.url || ''), 'http://x');
+    const q = (u.searchParams.get('room') || '').trim();
+    // fallback: take path segment (but we prefer ?room=)
+    const p = u.pathname.replace(/^\/+|\/+$/g,'');
+    return q || p || 'chat';
   } catch { return 'chat'; }
 }
-function broadcast(room, payload){
-  const set = rooms.get(room);
-  if (!set) return;
-  const s = JSON.stringify(payload);
-  for (const ws of set) { try { ws.send(s); } catch {} }
-}
-function sendTo(room, predicate, payload){
-  const set = rooms.get(room);
-  if (!set) return;
-  const s = JSON.stringify(payload);
-  for (const ws of set) {
-    const m = meta.get(ws);
-    if (m && predicate(m)) { try { ws.send(s); } catch {} }
-  }
-}
-function sha256(s){ return crypto.createHash('sha256').update(s).digest('hex'); }
 
-// ---------- Multer (25 MB) ----------
+// ---------- Multer ----------
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     const toVault = (req.body?.pw && String(req.body.pw).trim().length > 0);
@@ -89,15 +78,12 @@ const rooms = new Map(); // room -> Set(ws)
 const meta  = new Map(); // ws -> {room, ip, clientId}
 const reg   = new Map(); // id -> item
 
-// ---------- Static / API routes (register BEFORE catch-all) ----------
-
-// health
+// ---------- Health ----------
 app.get('/health', (_req, res) => res.json({ ok:true }));
 
-// serve uploads (public, unprotected pre-recall)
+// ---------- Static / API (before catch-all) ----------
 app.use('/uploads', express.static(uploadDir));
 
-// owner-only (always inline-capable)
 app.get('/myfile/:id', (req, res) => {
   const id = String(req.params.id || '');
   const item = reg.get(id);
@@ -107,7 +93,6 @@ app.get('/myfile/:id', (req, res) => {
   res.sendFile(path.resolve(item.privatePath));
 });
 
-// receiver-only after unlock
 app.get('/recvfile/:id', (req, res) => {
   const id = String(req.params.id || '');
   const item = reg.get(id);
@@ -117,7 +102,6 @@ app.get('/recvfile/:id', (req, res) => {
   res.sendFile(path.resolve(item.privatePath));
 });
 
-// viewer helper: resolve best URL for requester
 app.get('/fileurl/:id', (req, res) => {
   const id = String(req.params.id || '');
   const item = reg.get(id);
@@ -136,7 +120,6 @@ app.get('/fileurl/:id', (req, res) => {
   return res.status(403).json({ ok:false, error:'Not accessible' });
 });
 
-// upload (ttl + optional password; expects clientId)
 app.post('/upload/:room', upload.array('file', 5), (req, res) => {
   const room = (req.params.room || '').trim() || 'chat';
   const set = rooms.get(room);
@@ -186,7 +169,6 @@ app.post('/upload/:room', upload.array('file', 5), (req, res) => {
   res.json({ ok:true });
 });
 
-// unlock
 app.post('/unlock/:id', (req, res) => {
   const id = String(req.params.id || '');
   const pwd = (req.body?.password && String(req.body.password)) || '';
@@ -197,7 +179,7 @@ app.post('/unlock/:id', (req, res) => {
   const ip = getClientIP(req);
   if (ip === item.ownerIP) return res.status(403).json({ ok:false, error:'Owner does not need to unlock' });
 
-  const ok = (crypto.createHash('sha256').update(item.salt + '|' + pwd).digest('hex') === item.pwHash);
+  const ok = (sha256(item.salt + '|' + pwd) === item.pwHash);
   if (!ok) {
     performRecall(id);
     return res.status(403).json({ ok:false, error:'Incorrect password. File was recalled.' });
@@ -207,10 +189,8 @@ app.post('/unlock/:id', (req, res) => {
   return res.json({ ok:true });
 });
 
-// ---------- Catch-all (register LAST) ----------
-app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, 'index.html'));
-});
+// ---------- Catch-all (serve app) ----------
+app.get('*', (_req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 
 // ---------- Recall helpers ----------
 function moveFileToVault(item){
@@ -243,12 +223,28 @@ function scheduleAutoRecall(item){
   item.timer = setTimeout(() => performRecall(item.id), delay);
 }
 
-// ---------- WebSockets ----------
+// ---------- Server + WebSocket at /ws ----------
 const server = http.createServer(app);
-const wss = new WebSocketServer({ server });
+const wss = new WebSocketServer({ server, path: '/ws' });
+
+function broadcast(room, payload){
+  const set = rooms.get(room);
+  if (!set) return;
+  const s = JSON.stringify(payload);
+  for (const ws of set) { try { ws.send(s); } catch {} }
+}
+function sendTo(room, predicate, payload){
+  const set = rooms.get(room);
+  if (!set) return;
+  const s = JSON.stringify(payload);
+  for (const ws of set) {
+    const m = meta.get(ws);
+    if (m && predicate(m)) { try { ws.send(s); } catch {} }
+  }
+}
 
 wss.on('connection', (ws, req) => {
-  const room = roomFromReq(req);
+  const room = getRoom(req.url);
   const ip = getClientIP(req);
   const clientId = uid();
 
@@ -262,8 +258,7 @@ wss.on('connection', (ws, req) => {
   rooms.set(room, set);
   meta.set(ws, { room, ip, clientId });
 
-  console.log(`[WS] connected: room=${room} id=${clientId} ip=${ip} size=${set.size}`);
-
+  console.log(`[WS] connected room=${room} id=${clientId} ip=${ip} size=${set.size}`);
   ws.send(JSON.stringify({ type:'welcome', room, yourId: clientId, users: [...set].map(sock => meta.get(sock)?.clientId) }));
   broadcast(room, { type:'presence', users: [...set].map(sock => meta.get(sock)?.clientId) });
 
@@ -272,29 +267,20 @@ wss.on('connection', (ws, req) => {
     const m = meta.get(ws); if (!m) return;
 
     if (data.type === 'chat') {
-      const id = uid();
-      const text = String(data.text || '').slice(0, 4000);
-      const ts = Date.now();
-      reg.set(id, { id, room, type:'chat', ownerIP: m.ip, ownerId: m.clientId, ts, text, recalled:false });
-      broadcast(room, { type:'chat', id, fromId: m.clientId, text, ts });
+      const id = uid(); const ts = now();
+      reg.set(id, { id, room, type:'chat', ownerIP: m.ip, ownerId: m.clientId, ts, text: String(data.text||'').slice(0,4000), recalled:false });
+      broadcast(room, { type:'chat', id, fromId: m.clientId, text: String(data.text||''), ts });
       return;
     }
-
     if (data.type === 'recall' && data.id) {
-      const id = String(data.id);
-      const item = reg.get(id);
+      const item = reg.get(String(data.id));
       if (!item || item.room !== room) return;
-      if (item.ownerId !== m.clientId) {
-        ws.send(JSON.stringify({ type:'error', message:'Only the sender can recall this item.' }));
-        return;
-      }
-      performRecall(id);
-      return;
+      if (item.ownerId !== m.clientId) { ws.send(JSON.stringify({ type:'error', message:'Only the sender can recall this item.' })); return; }
+      performRecall(item.id); return;
     }
   });
 
   ws.on('close', () => {
-    const m = meta.get(ws);
     meta.delete(ws);
     const s = rooms.get(room);
     if (s) {
@@ -302,11 +288,13 @@ wss.on('connection', (ws, req) => {
       if (s.size === 0) rooms.delete(room);
       else broadcast(room, { type:'presence', users: [...s].map(sock => meta.get(sock)?.clientId) });
     }
-    console.log(`[WS] closed: room=${room} id=${clientId}`);
+    console.log(`[WS] closed room=${room} id=${clientId}`);
   });
 });
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-  console.log('Server listening on http://localhost:'+PORT);
+  console.log('Listening on http://localhost:'+PORT);
+  console.log('Open two tabs like: http://localhost:'+PORT+'/my-room');
+  console.log('Sockets at /ws?room=<room>');
 });
