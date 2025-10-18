@@ -13,11 +13,11 @@ const __dirname  = path.dirname(__filename);
 
 const app = express();
 app.use(cors());
-app.use(express.json());            // for /unlock
+app.use(express.json());            // for /unlock and JSON endpoints
 app.use(express.static(__dirname)); // serves index.html
 
 // ---------- Dirs ----------
-const uploadDir = path.join(__dirname, 'uploads'); // public before recall (non-protected files)
+const uploadDir = path.join(__dirname, 'uploads'); // public before recall (non-protected)
 const vaultDir  = path.join(__dirname, 'vault');   // private (owner-only & protected files)
 for (const d of [uploadDir, vaultDir]) if (!fs.existsSync(d)) fs.mkdirSync(d);
 
@@ -65,7 +65,6 @@ function sha256(s){ return crypto.createHash('sha256').update(s).digest('hex'); 
 // ---------- Multer (25 MB) ----------
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    // If password-protected, save directly to vault (never public)
     const toVault = (req.body?.pw && String(req.body.pw).trim().length > 0);
     cb(null, toVault ? vaultDir : uploadDir);
   },
@@ -109,24 +108,56 @@ const wss = new WebSocketServer({ server });
 // Static serving for /uploads (public pre-recall)
 app.use('/uploads', express.static(uploadDir));
 
-// Owner-only serving
+// Owner-only file (inline view/download allowed)
 app.get('/myfile/:id', (req, res) => {
   const id = String(req.params.id || '');
   const item = reg.get(id);
   if (!item || item.type !== 'file' || !item.privatePath) return res.status(404).end();
   const ip = getClientIP(req);
   if (ip !== item.owner) return res.status(403).send('Forbidden');
-  res.sendFile(path.resolve(item.privatePath));
+  res.sendFile(path.resolve(item.privatePath)); // inline by default
 });
 
-// Receiver-only (after unlock)
+// Receiver-only after unlock
 app.get('/recvfile/:id', (req, res) => {
   const id = String(req.params.id || '');
   const item = reg.get(id);
   if (!item || item.type !== 'file' || !item.privatePath) return res.status(404).end();
   const ip = getClientIP(req);
   if (ip !== item.unlockedFor) return res.status(403).send('Forbidden');
-  res.sendFile(path.resolve(item.privatePath));
+  res.sendFile(path.resolve(item.privatePath)); // inline by default
+});
+
+// --------- Unified "what URL can I view?" helper (for the viewer) ---------
+/**
+ * Returns the best accessible URL and mime for the requester.
+ * - Unprotected & not recalled: /uploads/<name>
+ * - Protected & unlocked (receiver): /recvfile/:id
+ * - Owner (any time, including recalled): /myfile/:id
+ * - Otherwise: 403
+ */
+app.get('/fileurl/:id', (req, res) => {
+  const id = String(req.params.id || '');
+  const item = reg.get(id);
+  if (!item || item.type !== 'file') return res.status(404).json({ ok:false, error:'Not found' });
+  const ip = getClientIP(req);
+
+  // Owner always can view (kept in vault after recall)
+  if (ip === item.owner && item.privatePath) {
+    return res.json({ ok:true, id, name: item.file.name, mime: item.file.mime, url: `/myfile/${id}` });
+  }
+
+  // If not protected, not recalled, still publicly served
+  if (!item.protected && !item.recalled && item.filePath) {
+    return res.json({ ok:true, id, name: item.file.name, mime: item.file.mime, url: `/uploads/${path.basename(item.filePath)}` });
+  }
+
+  // Protected and unlocked for this ip
+  if (item.protected && item.unlockedFor && ip === item.unlockedFor && item.privatePath) {
+    return res.json({ ok:true, id, name: item.file.name, mime: item.file.mime, url: `/recvfile/${id}` });
+  }
+
+  return res.status(403).json({ ok:false, error:'Not accessible' });
 });
 
 // ---------- Recall helpers ----------
@@ -164,7 +195,7 @@ function performRecall(id){
 }
 function scheduleAutoRecall(item){
   if (!item.expiresAt) return;
-  const delay = Math.max(0, Math.min(2147483647, item.expiresAt - now()));
+  const delay = clamp(item.expiresAt - now(), 0, 2147483647);
   item.timer = setTimeout(() => performRecall(item.id), delay);
 }
 
@@ -232,7 +263,7 @@ app.post('/upload/:room', upload.array('file', 5), (req, res) => {
   }
   const from = getClientIP(req);
 
-  const ttlSec  = clamp(parseInt((req.body?.ttl ?? '0'), 10) || 0, 0, 31*24*3600); // <= 31 days
+  const ttlSec  = clamp(parseInt((req.body?.ttl ?? '0'), 10) || 0, 0, 31*24*3600);
   const pwRaw   = (req.body?.pw && String(req.body.pw).trim()) || '';
 
   const files = (req.files || []).map(f => {
@@ -276,7 +307,7 @@ app.post('/upload/:room', upload.array('file', 5), (req, res) => {
 
     broadcast(room, basePayload);
 
-    // Owner augmentation (direct link if protected, or after recall)
+    // Owner augmentation (direct link if protected, or any time post-recall)
     const ownerAug = { type:'file_owner', id };
     if (record.privatePath) ownerAug.ownerUrl = `/myfile/${id}`;
     sendTo(room, (m) => m.username === from, ownerAug);
@@ -311,6 +342,6 @@ app.post('/unlock/:id', (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-  console.log('1:1 chat with file transfer + recall + auto-recall + password-protect listening on', PORT);
+  console.log('1:1 chat with inline viewer, recall, auto-recall, and password-protect is listening on', PORT);
   console.log('Open http://localhost:'+PORT+'/your-room');
 });
