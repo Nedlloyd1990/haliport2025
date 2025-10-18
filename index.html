@@ -31,32 +31,22 @@
   .row.me .sys{ text-align:right; }
   .status{ color:#9fb0c2; font-size:.92rem; }
 
-  .kebab{ position:absolute; top:6px; right:6px; width:32px; height:32px; display/grid; place-items:center; font-size:18px; background:var(--glass); border:1px solid rgba(255,255,255,.18); border-radius:10px; color:#e7edf4; cursor:pointer; opacity:.7; }
+  .kebab{ position:absolute; top:6px; right:6px; width:32px; height:32px; display:grid; place-items:center; font-size:18px; background:var(--glass); border:1px solid rgba(255,255,255,.18); border-radius:10px; color:#e7edf4; cursor:pointer; opacity:.7; }
   .bubble:hover .kebab{ opacity:1; }
   .menu{ position:absolute; top:42px; right:6px; background:#0e1622; border:1px solid var(--border); border-radius:12px; box-shadow:0 12px 30px rgba(0,0,0,.4); display:none; min-width:170px; z-index:5; }
   .menu.open{ display:block }
   .menu button{ width:100%; text-align:left; padding:10px 12px; background:transparent; border:0; color:#e7edf4; cursor:pointer; font-size:.95rem }
 
-  .overlay{ position:fixed; inset:0; background:rgba(0,0,0,.45); display:none; z-index:40; }
-  .overlay.open{ display:block; }
-  .sheet{ position:fixed; left:50%; top:50%; transform:translate(-50%, -50%); width:min(680px, 94vw); background:#0f1622; border:1px solid var(--border); border-radius:20px; box-shadow:0 30px 100px rgba(0,0,0,.65); padding:18px; display:none; z-index:41; }
-  .sheet.open{ display:block; }
-  .sheet h3{ margin:8px 0 14px; font-weight:700; letter-spacing:.2px }
-  .choices{ display:grid; grid-template-columns:1fr 1fr; gap:12px; margin:12px 0 6px }
-  .choice{ background:linear-gradient(180deg,#0f1927,#0d131d); border:1px solid var(--border); border-radius:16px; padding:16px; cursor:pointer; display:flex; flex-direction:column; gap:8px; transition:transform .12s ease, box-shadow .12s ease, border-color .12s ease; }
-  .choice:hover{ transform:translateY(-2px); box-shadow:0 12px 30px rgba(0,0,0,.4); border-color:#27405e }
-  .choice .title{ font-weight:600 }
-  .choice .desc{ color:#a9bdd2; font-size:.9rem }
-  .divider{ height:1px; background:var(--border); margin:12px 0 }
-  .panel{ display:none; gap:10px; align-items:center; flex-wrap:wrap; }
-  .panel.active{ display:flex }
-  .select{ background:#101725; color:#e7edf4; border:1px solid var(--border); border-radius:12px; padding:8px 10px; }
-  .input{ background:#101725; color:#e7edf4; border:1px solid var(--border); border-radius:12px; padding:9px 12px; }
-  .actions{ display:flex; gap:10px; justify-content:flex-end; margin-top:14px }
-  .btn{ border:1px solid var(--border); background:#1b87f3; color:#fff; padding:10px 14px; border-radius:12px; cursor:pointer; font-weight:600; }
-  .btn.secondary{ background:#0f151e; color:#e7edf4 }
-  .ghost{ background:transparent; border:0; color:#a9bdd2; cursor:pointer; }
-  .ghost:hover{ color:#d5e6ff; text-decoration:underline }
+  .viewer-overlay{ position:fixed; inset:0; background:rgba(0,0,0,.6); display:none; z-index:60; }
+  .viewer-overlay.open{ display:block; }
+  .viewer{ position:fixed; left:50%; top:50%; transform:translate(-50%,-50%); width:min(1200px, 96vw); height:min(80vh, 900px); background:#0e1520; border:1px solid var(--border); border-radius:16px; box-shadow:0 30px 120px rgba(0,0,0,.7); display:none; z-index:61; overflow:hidden; }
+  .viewer.open{ display:flex; flex-direction:column; }
+  .viewer-header{ display:flex; align-items:center; justify-content:space-between; padding:10px 14px; border-bottom:1px solid var(--border); background:#101827 }
+  .viewer-title{ font-weight:600; color:#dfeafb; overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
+  .viewer-close{ border:1px solid var(--border); background:var(--glass); color:#e7edf4; padding:6px 10px; border-radius:10px; cursor:pointer }
+  .viewer-body{ flex:1; background:#0b111b }
+  .viewer-body iframe, .viewer-body embed, .viewer-body img{ width:100%; height:100%; border:0; display:block; }
+  .viewer-fallback{ color:#cfe1f7; padding:20px; }
 </style>
 </head>
 <body>
@@ -77,39 +67,17 @@
   </div>
 </div>
 
-<!-- Attachment sheet -->
-<div id="overlay" class="overlay"></div>
-<div id="sheet" class="sheet" role="dialog" aria-modal="true" aria-labelledby="attTitle">
-  <h3 id="attTitle">Attachment Options</h3>
-  <div id="choices" class="choices">
-    <div id="chooseTTL" class="choice"><div class="title">Recall After</div><div class="desc">Auto-recall after a set time. Both sides see a red countdown.</div></div>
-    <div id="choosePW" class="choice"><div class="title">Recall with Password</div><div class="desc">Receiver must enter a password to view. One wrong attempt recalls the file.</div></div>
+<!-- Viewer -->
+<div id="viewerOverlay" class="viewer-overlay"></div>
+<div id="viewer" class="viewer" role="dialog" aria-modal="true" aria-labelledby="viewerTitle">
+  <div class="viewer-header">
+    <div id="viewerTitle" class="viewer-title">Preview</div>
+    <button id="viewerClose" class="viewer-close">Close</button>
   </div>
-  <div class="divider"></div>
-  <div id="panelTTL" class="panel" aria-hidden="true">
-    <span style="min-width:110px;color:#cfe1f7">Recall after</span>
-    <select id="ttlDays" class="select"></select><span>days</span>
-    <select id="ttlHours" class="select"></select><span>hours</span>
-    <select id="ttlMinutes" class="select"></select><span>minutes</span>
-    <select id="ttlSeconds" class="select"></select><span>seconds</span>
-  </div>
-  <div id="panelPW" class="panel" aria-hidden="true">
-    <span style="min-width:110px;color:#cfe1f7">Enter password</span>
-    <input id="pwInput" class="input" type="password" placeholder="Enter password" minlength="1" />
-  </div>
-  <div class="actions">
-    <button id="backChoice" class="ghost" style="margin-right:auto; display:none">← Back</button>
-    <button id="sendFiles" class="btn">Send files</button>
-    <button id="cancelAttach" class="btn secondary">Cancel</button>
-  </div>
+  <div id="viewerBody" class="viewer-body"></div>
 </div>
 
 <script>
-// Warn if opened as a file (no server => no connection)
-if (location.protocol === 'file:') {
-  alert('You opened index.html from your filesystem. Please run `node server.js` and open http://localhost:3000/.');
-}
-
 const log = document.getElementById('log');
 const title = document.getElementById('title');
 const presence = document.getElementById('presence');
@@ -118,253 +86,229 @@ const sendBtn = document.getElementById('send');
 const attachBtn = document.getElementById('attach');
 const fileInput = document.getElementById('fileInput');
 
-const room = (location.pathname.replace(/^\/+|\/+$/g,'') || 'chat');
-let myId = Math.random().toString(36).slice(2,10); // identity for non-WS modes
-let transport = 'ws'; // 'ws' | 'sse' | 'poll'
-let ws = null, sse = null, retries = 0;
-let pollSeq = 0; let pollTimer = null;
+let myId = null;
+let myRoom = location.pathname.replace(/^\/+|\/+$/g,'') || 'chat';
 
-// UI helpers
-function esc(s){ return String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&gt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]); }
+function wsURL(){
+  const proto = location.protocol === 'https:' ? 'wss://' : 'ws://';
+  return proto + location.host + location.pathname;
+}
+function esc(s){ return String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
 function humanSize(b){ const u=['B','KB','MB','GB']; let v=b,i=0; while(v>=1024&&i<u.length-1){v/=1024;i++;} return v.toFixed(v>=10||i===0?0:1)+' '+u[i]; }
-function row(kind,id,inner){ const r=document.createElement('div'); r.className='row ' + (kind==='me'?'me':''); r.dataset.id=id; r.innerHTML=inner; log.appendChild(r); log.scrollTop=log.scrollHeight; return r; }
 function bubbleMenu(id, mine){ return `<button class="kebab" data-action="open-menu" data-id="${id}" ${mine?'':'style="display:none"'}>⋯</button><div class="menu" data-menu-for="${id}"><button data-action="recall" data-id="${id}">Recall</button></div>`; }
-function writeText(kind, id, text, ts=Date.now()){ row(kind,id,`<div class="bubble">${bubbleMenu(id, kind==='me')}<div>${esc(text)}</div><div class="meta">${new Date(ts).toLocaleString()}</div></div>`); }
+function writeText(kind, id, text, ts=Date.now()){
+  const row = document.createElement('div');
+  row.className = 'row ' + (kind==='me' ? 'me' : '');
+  row.dataset.id = id;
+  row.innerHTML = `<div class="bubble">${bubbleMenu(id, kind==='me')}<div>${esc(text)}</div><div class="meta">${new Date(ts).toLocaleString()}</div></div>`;
+  log.appendChild(row); log.scrollTop = log.scrollHeight;
+}
 function fileControlsHTML(id, file, hasUrl, isProtected){
-  const viewBtn = hasUrl ? `<button class="btn-min view-btn" data-id="${id}" data-name="${esc(file.name)}" data-mime="${file.mime || ''}">👁️ View</button>` : '';
-  const download = hasUrl && !isProtected ? `<a class="btn-min" href="${file.url}" download>⬇️ Download</a>` : '';
+  const viewBtn = hasUrl ? `<button class="btn-min view-btn" data-id="${id}" data-name="${esc(file.name)}" data-mime="${file.mime || ''}" title="View in app">👁️ View</button>` : '';
+  const download = hasUrl && !isProtected ? `<a class="btn-min" href="${file.url}" download title="Download">⬇️ Download</a>` : '';
   return `<div class="file-commands" style="display:flex; gap:8px">${viewBtn}${download}</div>`;
 }
 function writeFile(kind, id, file, ts=Date.now(), expiresAt=null){
-  const r = row(kind,id,`<div class="bubble">${bubbleMenu(id, kind==='me')}<div class="filecard"><span class="filename">${esc(file.name)}</span> <span style="color:#9fb0c2">(${humanSize(file.size)})</span>${file.protected?'<span class="badge">🔒 Password</span>':''}</div>${fileControlsHTML(id,file,!!file.url,!!file.protected)}${expiresAt?`<div class="expiry" data-expires="${expiresAt}" data-id="${id}">⏱ calculating…</div>`:''}<div class="meta">${new Date(ts).toLocaleString()}</div></div>`);
-  if (file.protected && !file.url && kind!=='me'){
-    const wrap=document.createElement('div'); wrap.style.marginTop='10px';
-    wrap.innerHTML=`<input type="password" class="pwfield" placeholder="Enter password to unlock" style="background:#101725;color:#e7edf4;border:1px solid var(--border);border-radius:10px;padding:10px;width:240px"><button class="btnUnlock btn-min" data-id="${id}">Unlock</button>`;
-    r.querySelector('.bubble').appendChild(wrap);
+  const row = document.createElement('div'); row.className = 'row ' + (kind==='me' ? 'me' : ''); row.dataset.id = id;
+  const line = `<span class="filename">${esc(file.name)}</span> <span style="color:#9fb0c2">(${humanSize(file.size)})</span>`;
+  const badge = file.protected ? `<span class="badge">🔒 Password</span>` : '';
+  const commands = fileControlsHTML(id, file, !!file.url, !!file.protected);
+  row.innerHTML = `<div class="bubble">${bubbleMenu(id, kind==='me')}<div class="filecard">${line}${badge}</div>${commands}${expiresAt ? `<div class="expiry" data-expires="${expiresAt}" data-id="${id}">⏱ calculating…</div>` : ''}<div class="meta">${new Date(ts).toLocaleString()}</div></div>`;
+  log.appendChild(row);
+  if (file.protected && !file.url && kind !== 'me') {
+    const bubble = row.querySelector('.bubble');
+    const wrap = document.createElement('div');
+    wrap.style.marginTop = '10px';
+    wrap.innerHTML = `<input type="password" class="pwfield" placeholder="Enter password to unlock" style="background:#101725;color:#e7edf4;border:1px solid var(--border);border-radius:10px;padding:10px;width:240px"><button class="btnUnlock btn-min" data-id="${id}">Unlock</button>`;
+    bubble.appendChild(wrap);
   }
+  log.scrollTop = log.scrollHeight;
 }
 function recallForReceiver(id, sysText){
-  const r = log.querySelector(`.row[data-id="${CSS.escape(id)}"]`); if (!r) return;
-  const b = r.querySelector('.bubble'); if (b) b.innerHTML = `<div class="tomb">This item was recalled by the sender.</div><div class="sys">${sysText||'This item was recalled by the sender.'}</div>`;
+  const row = log.querySelector(`.row[data-id="${CSS.escape(id)}"]`); if (!row) return;
+  const bubble = row.querySelector('.bubble'); if (bubble) bubble.innerHTML = `<div class="tomb">This item was recalled by the sender.</div>`;
+  const sys = document.createElement('div'); sys.className='sys'; sys.textContent = sysText || 'This item was recalled by the sender.'; bubble?.appendChild(sys);
 }
 function markOwnerRecalled(id, sysText){
-  const r = log.querySelector(`.row[data-id="${CSS.escape(id)}"]`); if (!r) return;
-  r.querySelector('.expiry')?.remove();
-  const sys = document.createElement('div'); sys.className='sys'; sys.textContent = sysText || 'You recalled this. The other person can no longer see it.'; r.querySelector('.bubble')?.appendChild(sys);
+  const row = log.querySelector(`.row[data-id="${CSS.escape(id)}"]`); if (!row) return;
+  const sys = document.createElement('div'); sys.className='sys'; sys.textContent = sysText || 'You recalled this. The other person can no longer see it.'; row.querySelector('.bubble')?.appendChild(sys);
+  row.querySelector('.expiry')?.remove();
 }
 function setOwnerUrl(id){
-  const r = log.querySelector(`.row[data-id="${CSS.escape(id)}"]`); if (!r) return;
-  const cmds = r.querySelector('.file-commands');
-  if (cmds && !cmds.querySelector('.view-btn')) {
+  const row = log.querySelector(`.row[data-id="${CSS.escape(id)}"]`);
+  if (!row) return;
+  const commands = row.querySelector('.file-commands');
+  if (commands && !commands.querySelector('.view-btn')) {
+    const name = row.querySelector('.filename')?.textContent || 'file';
     const btn = document.createElement('button');
-    btn.className='btn-min view-btn'; btn.dataset.id = id; btn.textContent='👁️ View';
-    cmds.prepend(btn);
+    btn.className = 'btn-min view-btn';
+    btn.dataset.id = id; btn.dataset.name = name;
+    btn.textContent = '👁️ View';
+    commands.prepend(btn);
   }
 }
-// countdown tick
-setInterval(()=>{ const n=Date.now(); document.querySelectorAll('.expiry').forEach(el=>{ const exp=+el.getAttribute('data-expires')||0; const s=Math.max(0,Math.floor((exp-n)/1000)); const d=Math.floor(s/86400), h=Math.floor((s%86400)/3600), m=Math.floor((s%3600)/60), ss=s%60; el.textContent='⏱ '+(d?d+'d ':'')+(h?h+'h ':'')+(m?m+'m ':'')+ss+'s'; }); },1000);
+function fmtRemaining(ms){ if (ms<=0) return 'recalling…'; const s=Math.floor(ms/1000); const d=Math.floor(s/86400); const h=Math.floor((s%86400)/3600); const m=Math.floor((s%3600)/60); const ss=s%60; const p=[]; if(d)p.push(d+'d'); if(h||d)p.push(h+'h'); if(m||h||d)p.push(m+'m'); p.push(ss+'s'); return '⏱ '+p.join(' '); }
+setInterval(()=>{ const n=Date.now(); document.querySelectorAll('.expiry').forEach(el=>{ const exp=parseInt(el.getAttribute('data-expires')||'0',10); el.textContent = fmtRemaining(exp-n); }); },1000);
 
-// Viewer
-async function openViewerFor(id){
-  try{
-    const res = await fetch(`/fileurl/${encodeURIComponent(id)}`);
-    const info = await res.json();
-    if (!res.ok || !info?.ok) throw new Error(info?.error || 'Not accessible');
-    const w = window.open(info.url, '_blank','noopener'); if (!w) alert('Popup blocked. Please allow popups to preview.');
-  }catch(err){ writeText('them','_','⚠️ '+(err?.message || 'Preview not accessible')); }
-}
-
-// ---- Transport chain: WS -> SSE -> Polling ----
-function wsURL(){ const proto = location.protocol==='https:'?'wss://':'ws://'; return proto + location.host + '/ws?room=' + encodeURIComponent(room); }
-function startWS(){
-  transport='ws';
+// ===== WS with retry =====
+let ws, retries=0;
+function connectWS(){
   const url = wsURL();
-  presence.textContent = `Connecting (WebSocket)…`;
-  console.log('[WS] trying', url);
-  try {
-    ws = new WebSocket(url);
-  } catch(e) {
-    console.warn('[WS] ctor failed', e);
-    startSSE(); return;
-  }
-  ws.onopen = () => { retries=0; presence.textContent='Connected (WebSocket)'; title.textContent='Room: '+room; console.log('[WS] open'); };
-  ws.onerror = (e) => { presence.textContent='WebSocket error'; console.warn('[WS] error', e); };
+  presence.textContent = `Connecting to ${url}…`;
+  ws = new WebSocket(url);
+
+  ws.onopen = () => { retries=0; presence.textContent = 'Connected'; title.textContent = 'Room: '+myRoom; };
+
+  ws.onerror = (e) => {
+    console.error('[WS] error', e);
+    presence.textContent = 'Connection error';
+  };
+
   ws.onclose = (ev) => {
     console.warn('[WS] closed', ev.code, ev.reason);
+    presence.textContent = 'Disconnected — retrying…';
+    const backoff = Math.min(3000 * (retries+1), 10000);
     retries++;
-    if (retries >= 3) { startSSE(); return; }
-    presence.textContent = 'WS closed — retrying…';
-    setTimeout(startWS, Math.min(3000*retries,10000));
+    setTimeout(connectWS, backoff);
   };
-  ws.onmessage = (ev) => handleEvent(JSON.parse(ev.data));
-}
-function startSSE(){
-  transport='sse';
-  presence.textContent = 'Connecting (Fallback)…';
-  const url = '/sse?room='+encodeURIComponent(room);
-  console.log('[SSE] trying', url);
-  try{
-    sse = new EventSource(url);
-  }catch(e){
-    console.warn('[SSE] ctor failed', e);
-    startPolling(); return;
-  }
-  sse.onopen  = () => { presence.textContent='Connected (Fallback)'; title.textContent='Room: '+room+' • Fallback'; console.log('[SSE] open'); };
-  sse.onerror = (e) => { 
-    console.warn('[SSE] error', e); 
-    // some environments block SSE entirely
-    sse.close?.();
-    startPolling();
-  };
-  sse.onmessage = (ev) => { try{ handleEvent(JSON.parse(ev.data)); }catch(e){ console.warn('[SSE] bad event', e); } };
-}
-function startPolling(){
-  transport='poll';
-  presence.textContent = 'Connected (Polling)';
-  title.textContent = 'Room: '+room+' • Polling';
-  console.log('[POLL] start');
-  // initial fetch to get cursor
-  (async function prime(){
-    try{
-      const r = await fetch(`/poll?room=${encodeURIComponent(room)}&after=${pollSeq}`);
-      const j = await r.json(); if (j?.next) pollSeq = j.next - 1;
-    }catch(e){ console.warn('[POLL] prime failed', e); }
-    loopPoll();
-  })();
-}
-async function loopPoll(){
-  try{
-    const r = await fetch(`/poll?room=${encodeURIComponent(room)}&after=${pollSeq}`);
-    const j = await r.json();
-    if (j?.events?.length){
-      for (const ev of j.events){ pollSeq = Math.max(pollSeq, ev.seq); handleEvent(ev.data); }
+
+  ws.onmessage = (ev) => {
+    const d = JSON.parse(ev.data);
+
+    if (d.type === 'room_full') {
+      presence.textContent = 'Room is full';
+      writeText('them','_','Room is full. Create a new path, e.g., /chat-1234');
+      return;
     }
-  }catch(e){ console.warn('[POLL] error', e); }
-  pollTimer = setTimeout(loopPoll, 1500); // 1.5s cadence
+    if (d.type === 'welcome') {
+      myId = d.yourId;
+      presence.textContent = `Connected • users: ${(d.users||[]).length}`;
+      title.textContent = `Room: ${d.room} • You: ${myId}`;
+      return;
+    }
+    if (d.type === 'presence') {
+      presence.textContent = `Connected • users: ${(d.users||[]).length}`;
+      return;
+    }
+    if (d.type === 'chat') {
+      const who = d.fromId === myId ? 'me' : 'them';
+      writeText(who, d.id, d.text, d.ts); return;
+    }
+    if (d.type === 'file') {
+      const who = d.fromId === myId ? 'me' : 'them';
+      writeFile(who, d.id, d.file, d.ts, d.expiresAt || null); return;
+    }
+    if (d.type === 'file_owner') { setOwnerUrl(d.id); return; }
+    if (d.type === 'file_unlocked') {
+      const row = log.querySelector(`.row[data-id="${CSS.escape(d.id)}"]`);
+      row?.querySelector('.pwfield')?.remove();
+      row?.querySelector('.btnUnlock')?.remove();
+      setOwnerUrl(d.id);
+      return;
+    }
+    if (d.type === 'recalled') { recallForReceiver(d.id, d.sys); return; }
+    if (d.type === 'recalled_owner') { markOwnerRecalled(d.id, d.sys); return; }
+    if (d.type === 'error') { writeText('them','_','⚠️ '+(d.message||'Error')); return; }
+  };
 }
-function sendEvent(obj){
-  if (transport==='ws' && ws && ws.readyState===1) {
-    ws.send(JSON.stringify(obj));
-  } else if (transport==='sse' || transport==='poll') {
-    fetch('/push', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ room, ...obj, fromId: myId }) });
-  }
-}
-startWS();
+connectWS();
 
-// ---- Event handler ----
-function handleEvent(d){
-  if (d.type === 'room_full') { presence.textContent='Room is full'; writeText('them','_','Room is full. Use a different path.'); return; }
-  if (d.type === 'welcome') { if (d.yourId) myId = d.yourId; presence.textContent = (transport==='ws'?'Connected (WebSocket)': transport==='sse'?'Connected (Fallback)':'Connected (Polling)'); title.textContent = `Room: ${d.room} ${myId?`• You: ${myId}`:''}`; return; }
-  if (d.type === 'presence') { presence.textContent = `Connected • users: ${(d.users||[]).length}`; return; }
-  if (d.type === 'chat') { writeText(d.fromId===myId?'me':'them', d.id, d.text, d.ts); return; }
-  if (d.type === 'file') { writeFile(d.fromId===myId?'me':'them', d.id, d.file, d.ts, d.expiresAt||null); return; }
-  if (d.type === 'file_owner') { setOwnerUrl(d.id); return; }
-  if (d.type === 'file_unlocked') {
-    const r = log.querySelector(`.row[data-id="${CSS.escape(d.id)}"]`);
-    r?.querySelector('.pwfield')?.remove(); r?.querySelector('.btnUnlock')?.remove();
-    setOwnerUrl(d.id); return;
-  }
-  if (d.type === 'recalled') { recallForReceiver(d.id, d.sys); return; }
-  if (d.type === 'recalled_owner') { markOwnerRecalled(d.id, d.sys); return; }
-  if (d.type === 'error') { writeText('them','_','⚠️ '+(d.message||'Error')); return; }
-}
-
-// ---- Send / Recall ----
-function send(){ const text = msgInput.value.trim(); if(!text) return; sendEvent({ type:'chat', text }); msgInput.value=''; }
-function recall(id){ sendEvent({ type:'recall', id }); }
+// send / recall
+function send(){ const text = msgInput.value.trim(); if(!text || ws.readyState!==1) return; ws.send(JSON.stringify({type:'chat', text})); msgInput.value=''; }
+function recall(id){ if (ws.readyState!==1) return; ws.send(JSON.stringify({ type:'recall', id })); }
 sendBtn.onclick = send;
 msgInput.addEventListener('keydown', (e)=>{ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); send(); }});
 
-// ---- Attachment sheet ----
-const overlay = document.getElementById('overlay');
-const sheet   = document.getElementById('sheet');
-const choices = document.getElementById('choices');
-const panelTTL= document.getElementById('panelTTL');
-const panelPW = document.getElementById('panelPW');
-const backBtn = document.getElementById('backChoice');
-const sendFilesBtn = document.getElementById('sendFiles');
-const cancelAttach = document.getElementById('cancelAttach');
-const chooseTTL = document.getElementById('chooseTTL');
-const choosePW  = document.getElementById('choosePW');
-const selD = document.getElementById('ttlDays');
-const selH = document.getElementById('ttlHours');
-const selM = document.getElementById('ttlMinutes');
-const selS = document.getElementById('ttlSeconds');
-const pwInput = document.getElementById('pwInput');
-
-let pendingFiles = null; let mode = null;
-function fillSelect(sel, max){ sel.innerHTML=''; for(let i=0;i<=max;i++){ const o=document.createElement('option'); o.value=i; o.textContent=String(i).padStart(2,'0'); sel.appendChild(o);} }
-fillSelect(selD, 30); fillSelect(selH, 23); fillSelect(selM, 59); fillSelect(selS, 59);
-
-function openSheet(){ overlay.classList.add('open'); sheet.classList.add('open'); showChoices(); }
-function closeSheet(){ overlay.classList.remove('open'); sheet.classList.remove('open'); pendingFiles=null; mode=null; }
-function showChoices(){ choices.style.display='grid'; panelTTL.classList.remove('active'); panelPW.classList.remove('active'); backBtn.style.display='none'; }
-function showTTL(){ choices.style.display='none'; panelTTL.classList.add('active'); panelPW.classList.remove('active'); backBtn.style.display='inline'; selD.value='0'; selH.value='0'; selM.value='0'; selS.value='0'; mode='ttl'; }
-function showPW(){ choices.style.display='none'; panelPW.classList.add('active'); panelTTL.classList.remove('active'); backBtn.style.display='inline'; pwInput.value=''; pwInput.focus(); mode='pw'; }
-
-attachBtn.addEventListener('click', ()=> fileInput.click());
-fileInput.addEventListener('change', (e)=>{ const files = Array.from(e.target.files||[]); if(!files.length) return; pendingFiles = files; openSheet(); });
-overlay.addEventListener('click', closeSheet);
-cancelAttach.addEventListener('click', closeSheet);
-backBtn.addEventListener('click', showChoices);
-chooseTTL.addEventListener('click', showTTL);
-choosePW.addEventListener('click', showPW);
-
+// upload (no TTL/PW here; your sheet can call uploadFiles with options)
 async function uploadFiles(files, ttlSeconds=0, password=''){
   const form = new FormData();
   for (const f of files) form.append('file', f);
   if (ttlSeconds>0) form.append('ttl', String(ttlSeconds));
   if (password) form.append('pw', password);
-  form.append('clientId', myId);
-  const res = await fetch(`/upload/${encodeURIComponent(room)}`, { method:'POST', body: form });
+  if (myId) form.append('clientId', myId);
+  const res = await fetch(`/upload/${encodeURIComponent(myRoom)}`, { method:'POST', body: form });
   if (!res.ok) {
     let j={}; try{ j=await res.json(); }catch{}
     writeText('them','_','⚠️ '+(j.error || ('Upload failed: '+res.status)));
   }
-  fileInput.value = '';
 }
-sendFilesBtn.addEventListener('click', async ()=>{
-  if (!pendingFiles) return closeSheet();
-  let ttlSeconds=0, password='';
-  if (mode==='ttl'){ const d=+selD.value||0, h=+selH.value||0, m=+selM.value||0, s=+selS.value||0; ttlSeconds = d*86400 + h*3600 + m*60 + s; }
-  if (mode==='pw'){ password = pwInput.value.trim(); if (!password){ alert('Please enter a password'); return; } }
-  await uploadFiles(pendingFiles, ttlSeconds, password);
-  closeSheet();
+attachBtn.addEventListener('click', ()=> fileInput.click());
+fileInput.addEventListener('change', async (e) => {
+  const files = Array.from(e.target.files || []);
+  if (!files.length) return;
+  await uploadFiles(files, 0, '');
+  fileInput.value = '';
 });
 
-// Unlock & menu & view
+// unlock
 log.addEventListener('click', async (e) => {
-  const ub = e.target.closest('.btnUnlock');
-  if (ub){
-    const id = ub.dataset.id;
-    const r = log.querySelector(`.row[data-id="${CSS.escape(id)}"]`);
-    const p = r?.querySelector('.pwfield')?.value || '';
-    const res = await fetch(`/unlock/${encodeURIComponent(id)}`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ password: p }) });
-    if (!res.ok) { let j={}; try{ j=await res.json(); }catch{}; writeText('them','_','⚠️ '+(j.error || 'Unlock failed')); }
-    return;
+  const btn = e.target.closest('.btnUnlock'); if (!btn) return;
+  const id = btn.dataset.id;
+  const row = log.querySelector(`.row[data-id="${CSS.escape(id)}"]`);
+  const pwf = row?.querySelector('.pwfield'); const pass = pwf?.value || '';
+  try{
+    const res = await fetch(`/unlock/${encodeURIComponent(id)}`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ password: pass }) });
+    if (!res.ok) { const j = await res.json().catch(()=>({})); console.warn(j.error || 'Unlock failed'); }
+  }catch(err){ console.warn(err); }
+});
+
+// menus
+log.addEventListener('click', (e) => {
+  const btn = e.target.closest('button'); if (!btn) return;
+  const action = btn.dataset.action; const id = btn.dataset.id;
+  if (action === 'open-menu') {
+    document.querySelectorAll('.menu.open').forEach(m => m.classList.remove('open'));
+    const menu = log.querySelector(`.menu[data-menu-for="${CSS.escape(id)}"]`);
+    if (menu) menu.classList.add('open');
   }
-  const btn = e.target.closest('button'); 
-  if (btn && btn.dataset.action==='open-menu'){
-    document.querySelectorAll('.menu.open').forEach(m=>m.classList.remove('open'));
-    const menu = log.querySelector(`.menu[data-menu_for="${CSS.escape(btn.dataset.id)}"]`) || log.querySelector(`.menu[data-menu-for="${CSS.escape(btn.dataset.id)}"]`);
-    (menu||{}).classList?.add?.('open');
-    return;
+  if (action === 'recall') {
+    const menu = log.querySelector(`.menu[data-menu-for="${CSS.escape(id)}"]`); if (menu) menu.classList.remove('open');
+    recall(id);
   }
-  if (btn && btn.dataset.action==='recall'){
-    document.querySelectorAll('.menu.open').forEach(m=>m.classList.remove('open'));
-    sendEvent({ type:'recall', id: btn.dataset.id });
-    return;
-  }
-  const vb = e.target.closest('.view-btn'); 
-  if (vb){ openViewerFor(vb.dataset.id); return; }
 });
 document.addEventListener('click', (e) => {
-  const inside = e.target.closest('.menu, .kebab, .sheet'); 
-  if (!inside) document.querySelectorAll('.menu.open').forEach(m => m.classList.remove('open'));
+  const inside = e.target.closest('.menu, .kebab, .viewer'); if (!inside) document.querySelectorAll('.menu.open').forEach(m => m.classList.remove('open'));
 });
 
-// countdown text refresh
-setInterval(()=>{ const n=Date.now(); document.querySelectorAll('.expiry').forEach(el=>{ const exp=+el.getAttribute('data-expires')||0; const s=Math.max(0,Math.floor((exp-n)/1000)); const d=Math.floor(s/86400), h=Math.floor((s%86400)/3600), m=Math.floor((s%3600)/60), ss=s%60; el.textContent='⏱ '+(d?d+'d ':'')+(h?h+'h ':'')+(m?m+'m ':'')+ss+'s'; }); },1000);
+// viewer
+const viewerOverlay = document.getElementById('viewerOverlay');
+const viewer        = document.getElementById('viewer');
+const viewerBody    = document.getElementById('viewerBody');
+const viewerTitle   = document.getElementById('viewerTitle');
+const viewerClose   = document.getElementById('viewerClose');
+function openViewer(){ viewerOverlay.classList.add('open'); viewer.classList.add('open'); }
+function closeViewer(){ viewerOverlay.classList.remove('open'); viewer.classList.remove('open'); viewerBody.innerHTML=''; viewerTitle.textContent='Preview'; }
+viewerOverlay.addEventListener('click', closeViewer);
+viewerClose.addEventListener('click', closeViewer);
+
+log.addEventListener('click', async (e) => {
+  const vb = e.target.closest('.view-btn'); if (!vb) return;
+  const id = vb.dataset.id;
+  let info;
+  try{
+    const res = await fetch(`/fileurl/${encodeURIComponent(id)}`);
+    info = await res.json();
+    if (!res.ok || !info?.ok) throw new Error(info?.error || 'Not accessible');
+  }catch(err){
+    writeText('them','_','⚠️ '+(err?.message || 'Preview not accessible'));
+    return;
+  }
+  const { url, mime, name } = info;
+  viewerTitle.textContent = name || 'Preview';
+  viewerBody.innerHTML = '';
+  if (/^image\//i.test(mime)) {
+    const img = document.createElement('img'); img.src = url; img.alt = name || 'image'; viewerBody.appendChild(img);
+  } else if (/^application\/pdf$/i.test(mime)) {
+    const embed = document.createElement('embed'); embed.type = 'application/pdf'; embed.src = url + '#toolbar=1&navpanes=0&statusbar=0'; viewerBody.appendChild(embed);
+  } else if (/^text\//i.test(mime)) {
+    const iframe = document.createElement('iframe'); iframe.src = url; iframe.setAttribute('sandbox','allow-scripts allow-same-origin'); viewerBody.appendChild(iframe);
+  } else {
+    const fb = document.createElement('div'); fb.className = 'viewer-fallback';
+    fb.innerHTML = `Preview not supported for <code>${mime || 'this file type'}</code>.`;
+    viewerBody.appendChild(fb);
+  }
+  openViewer();
+});
 </script>
 </body>
 </html>
